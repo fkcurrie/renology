@@ -1,0 +1,15 @@
+[Unit]
+Description=Renology Solar BLE Poller, SQLite Engine & HTTP API
+After=network.target bluetooth.target
+Wants=bluetooth.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/fcurrie/Projects/renology
+ExecStart=/home/fcurrie/Projects/renology/renology -mac 60:98:66:F9:84:D6 -interval 5 -out ./data -http :8080
+Restart=always
+RestartSec=5
+Nice=10
+
+[Install]
+WantedBy=default.target

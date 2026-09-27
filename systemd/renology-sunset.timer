@@ -1,0 +1,10 @@
+[Unit]
+Description=Timer for Renology Daily Sunset Reporter
+After=time-sync.target
+
+[Timer]
+OnCalendar=*:00,10,20,30,40,50
+Persistent=true
+
+[Install]
+WantedBy=timers.target

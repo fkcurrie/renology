@@ -1,0 +1,10 @@
+[Unit]
+Description=Hourly Timer for Renology & Weather Autonomous Troubleshooter
+After=time-sync.target
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+
+[Install]
+WantedBy=timers.target

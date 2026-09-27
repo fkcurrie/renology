@@ -41,6 +41,17 @@
 │       ├── index.html         # High-contrast solar kiosk UI
 │       ├── style.css          # Anti-glare dark automotive theme
 │       └── app.js             # Automotive fuel dial canvas & 24h/7d charts
+├── scripts/
+│   ├── mailer.py              # Pure Python 3 email engine (SMTP TLS 587/465 + Outbox queue)
+│   ├── sunset_reporter.py     # Sunset daily solar harvest & weather reporter to frank@sfle.ca
+│   ├── health_check.py        # Multi-pillar SRE health inspector (JSON & CLI triage)
+│   ├── troubleshooter.py      # Hourly autonomous watcher: self-healing + agy escalation
+│   └── test_suite.py          # Automated verification test suite
+├── systemd/
+│   ├── renology.service       # Systemd user service for Renology poller & HTTP API
+│   ├── renology-kiosk.service # Systemd user service for Firefox fullscreen kiosk
+│   ├── renology-sunset.service/timer # Daily sunset report dispatch timer
+│   └── renology-troubleshooter.service/timer # Hourly autonomous self-healing timer
 ├── start-kiosk.sh             # 1-click launcher for Linux Mint / Surface Go 2
 ├── data/                      # Local telemetry outputs (git-ignored)
 │   ├── renology.db            # Embedded SQLite database (WAL mode, indexed time-series)
@@ -48,7 +59,8 @@
 │   ├── latest_status.json     # Live telemetry snapshot
 │   ├── renology_telemetry.jsonl # Append-only raw backup
 │   ├── renology_history.csv   # CSV export format
-│   └── rf_survey.csv          # RF signal link survey log
+│   ├── rf_survey.csv          # RF signal link survey log
+│   └── outbox/                # Safe spool for queued alert & report emails
 ├── SOUL.md                    # Project mission, architectural manifesto & roadmap
 ├── GEMINI.md                  # This operational runbook & technical reference
 └── README.md                  # Public documentation & getting started guide

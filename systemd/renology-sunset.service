@@ -1,0 +1,11 @@
+[Unit]
+Description=Renology Daily Sunset Solar & Weather Dispatch
+After=network.target renology.service weather-server.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/fcurrie/Projects/renology
+ExecStart=/usr/bin/python3 /home/fcurrie/Projects/renology/scripts/sunset_reporter.py
+StandardOutput=journal
+StandardError=journal
+Nice=15

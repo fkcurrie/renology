@@ -1,0 +1,14 @@
+[Unit]
+Description=Renology Surface Go 2 Fullscreen Kiosk Display
+After=renology.service graphical-session.target
+Wants=renology.service
+
+[Service]
+Type=simple
+Environment=DISPLAY=:0
+ExecStart=/usr/bin/firefox --kiosk http://localhost:8080
+Restart=on-failure
+RestartSec=8
+
+[Install]
+WantedBy=default.target

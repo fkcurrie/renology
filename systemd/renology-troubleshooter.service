@@ -1,0 +1,11 @@
+[Unit]
+Description=Renology & Weather Autonomous Hourly Troubleshooter
+After=network.target renology.service weather-server.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/fcurrie/Projects/renology
+ExecStart=/usr/bin/python3 /home/fcurrie/Projects/renology/scripts/troubleshooter.py --now
+StandardOutput=journal
+StandardError=journal
+Nice=15
