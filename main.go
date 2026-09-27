@@ -1,17 +1,21 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/csv"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"encoding/csv"
-	"io"
-	"os/exec"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -33,8 +37,25 @@ func main() {
 	showStatus := flag.Bool("status", false, "Print summary of RF survey and latest telemetry status")
 	recentMin := flag.Int("recent", 0, "Print telemetry summary and time-series table for the last N minutes (e.g. -recent 60)")
 	rawOutput := flag.Bool("raw", false, "When using -recent, print individual raw samples instead of minute aggregates")
+	cloudURL := flag.String("cloud-url", "", "Remote Cloud Run URL to push live telemetry to (e.g. https://solar.sfle.ca)")
+	cloudToken := flag.String("cloud-token", "", "Token for authenticating cloud push requests")
+	cloudRelay := flag.Bool("cloud-relay", false, "Run in Cloud Run relay mode (ingests telemetry pushes, serves kiosk)")
 	verbose := flag.Bool("verbose", false, "Enable verbose packet-level debug output")
 	flag.Parse()
+
+	// Support Google Cloud Run PORT environment variable
+	if envPort := os.Getenv("PORT"); envPort != "" {
+		*httpAddr = ":" + envPort
+	}
+	if envToken := os.Getenv("RENOLOGY_CLOUD_TOKEN"); envToken != "" && *cloudToken == "" {
+		*cloudToken = envToken
+	}
+	if envCloudURL := os.Getenv("RENOLOGY_CLOUD_URL"); envCloudURL != "" && *cloudURL == "" {
+		*cloudURL = envCloudURL
+	}
+	if *cloudRelay {
+		*webOnly = true
+	}
 
 	absOutDir, err := filepath.Abs(*outputDir)
 	if err != nil {
@@ -94,6 +115,8 @@ func main() {
 			ListenAddr: *httpAddr,
 			Storage:    store,
 			Verbose:    *verbose,
+			CloudRelay: *cloudRelay,
+			CloudToken: *cloudToken,
 		})
 		if err != nil {
 			log.Fatalf("Failed to initialize web server: %v", err)
@@ -110,7 +133,12 @@ func main() {
 		}
 	}
 
-	// 2. Run Poller or Web-Only Mode
+	// 2. Start Cloud Pusher if configured
+	if *cloudURL != "" {
+		go startCloudPusher(ctx, *cloudURL, *cloudToken, store, time.Duration(*pollSec)*time.Second, *verbose)
+	}
+
+	// 3. Run Poller or Web-Only Mode
 	if *webOnly {
 		log.Println("[Renology] Running in web-only kiosk mode (BLE polling disabled). Press Ctrl+C to stop.")
 		<-ctx.Done()
@@ -393,4 +421,83 @@ func printRecentReport(dataDir string, minutes int, raw bool) {
 	}
 	fmt.Println("========================================================================================================")
 }
+
+// startCloudPusher runs a resilient background worker that pushes live telemetry,
+// weather readings, and historical curves to Cloud Run.
+func startCloudPusher(ctx context.Context, cloudURL, token string, store *storage.Storage, interval time.Duration, verbose bool) {
+	cloudURL = strings.TrimRight(cloudURL, "/")
+	pushURL := cloudURL + "/api/telemetry/push"
+	httpClient := &http.Client{
+		Timeout: 5 * time.Second,
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	log.Printf("[Cloud Pusher] Starting telemetry sync to %s (interval %v)", pushURL, interval)
+
+	historyCounter := 0
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			latest, err := store.GetLatest()
+			if err != nil || latest == nil {
+				continue
+			}
+
+			// Gather local weather station snapshot if available
+			var weatherData map[string]interface{}
+			if wResp, err := httpClient.Get("http://127.0.0.1:8088/api/weather/current"); err == nil {
+				_ = json.NewDecoder(wResp.Body).Decode(&weatherData)
+				wResp.Body.Close()
+			}
+
+			// Periodically include 24h & 7d history snapshot (every 6th poll, e.g. ~30s, or on startup)
+			var hist *models.HistoryResponse
+			if historyCounter%6 == 0 {
+				if h, err := store.GetHistory(time.Now()); err == nil {
+					hist = h
+				}
+			}
+			historyCounter++
+
+			payload := models.CloudSyncPayload{
+				Telemetry: latest,
+				Weather:   weatherData,
+				History:   hist,
+				Timestamp: time.Now(),
+			}
+
+			bodyBytes, err := json.Marshal(payload)
+			if err != nil {
+				continue
+			}
+
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, pushURL, bytes.NewReader(bodyBytes))
+			if err != nil {
+				continue
+			}
+			req.Header.Set("Content-Type", "application/json")
+			if token != "" {
+				req.Header.Set("X-Renology-Token", token)
+			}
+
+			resp, err := httpClient.Do(req)
+			if err != nil {
+				if verbose {
+					log.Printf("[Cloud Pusher] Sync error: %v", err)
+				}
+				continue
+			}
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusOK && verbose {
+				log.Printf("[Cloud Pusher] Remote returned status %d", resp.StatusCode)
+			}
+		}
+	}
+}
+
 

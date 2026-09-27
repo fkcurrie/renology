@@ -1,0 +1,11 @@
+.git
+.github
+data/
+*.db
+*.db-wal
+*.db-shm
+*.log
+renology
+__pycache__
+*.pyc
+scratch/

@@ -166,3 +166,107 @@ func TestWebServerEndpoints(t *testing.T) {
 		t.Errorf("Expected 1 sample in recent history, got %d", recentResp.TotalSamples)
 	}
 }
+
+func TestCloudRelayPush(t *testing.T) {
+	// Initialize server in Cloud Relay mode with a secret token
+	server, err := NewServer(ServerConfig{
+		ListenAddr: ":0",
+		CloudRelay: true,
+		CloudToken: "secret123",
+	})
+	if err != nil {
+		t.Fatalf("NewServer failed: %v", err)
+	}
+
+	pushPayload := models.CloudSyncPayload{
+		Telemetry: &models.Telemetry{
+			Timestamp:      time.Now(),
+			DeviceName:     "BT-TH-66F984D6",
+			Model:          "RNG-CTRL-RVR20",
+			BatterySOC:     99,
+			BatteryVoltage: 13.4,
+			PVVoltage:      35.2,
+			PVPower:        220,
+			ChargingStatus: "MPPT",
+		},
+		Weather: map[string]interface{}{
+			"outdoor_temp_c": 21.5,
+			"solar_wm2":      650,
+			"status":         "online",
+		},
+		History: &models.HistoryResponse{
+			Points24h: []models.HistoryPoint24h{
+				{TimeLabel: "12:00", SolarPowerW: 220, PVVoltage: 35.2},
+			},
+			Days7d: []models.DailySummary7d{
+				{DayLabel: "Today", PeakSolarWatts: 220, EnergyWh: 1500},
+			},
+		},
+		Timestamp: time.Now(),
+	}
+	bodyBytes, _ := json.Marshal(pushPayload)
+
+	// 1. Test unauthorized push (wrong token)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/telemetry/push", strings.NewReader(string(bodyBytes)))
+	req.Header.Set("X-Renology-Token", "wrong_token")
+	server.httpServer.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("Expected 401 Unauthorized, got %d", rec.Code)
+	}
+
+	// 2. Test authorized push (correct token)
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("POST", "/api/telemetry/push", strings.NewReader(string(bodyBytes)))
+	req.Header.Set("X-Renology-Token", "secret123")
+	server.httpServer.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// 3. Test GET /api/status returns pushed telemetry
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("GET", "/api/status", nil)
+	server.httpServer.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected GET /api/status 200 OK, got %d", rec.Code)
+	}
+	var status models.Telemetry
+	if err := json.Unmarshal(rec.Body.Bytes(), &status); err != nil {
+		t.Fatalf("Failed to parse status JSON: %v", err)
+	}
+	if status.BatterySOC != 99 || status.PVPower != 220 {
+		t.Errorf("Unexpected status data: SOC=%d PV=%d", status.BatterySOC, status.PVPower)
+	}
+
+	// 4. Test GET /api/weather returns pushed weather
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("GET", "/api/weather", nil)
+	server.httpServer.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected GET /api/weather 200 OK, got %d", rec.Code)
+	}
+	var weather map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &weather); err != nil {
+		t.Fatalf("Failed to parse weather JSON: %v", err)
+	}
+	if weather["outdoor_temp_c"] != 21.5 {
+		t.Errorf("Unexpected weather temp: %v", weather["outdoor_temp_c"])
+	}
+
+	// 5. Test GET /api/history returns pushed history
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("GET", "/api/history", nil)
+	server.httpServer.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected GET /api/history 200 OK, got %d", rec.Code)
+	}
+	var hist models.HistoryResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &hist); err != nil {
+		t.Fatalf("Failed to parse history JSON: %v", err)
+	}
+	if len(hist.Points24h) != 1 || hist.Points24h[0].SolarPowerW != 220 {
+		t.Errorf("Unexpected history response: %+v", hist)
+	}
+}
+

@@ -74,3 +74,12 @@ type Telemetry struct {
 	FaultCode               uint32    `json:"fault_code"`
 	FaultDescriptions       []string  `json:"fault_descriptions,omitempty"`
 }
+
+// CloudSyncPayload represents the complete live snapshot pushed from edge to cloud.
+type CloudSyncPayload struct {
+	Telemetry *Telemetry             `json:"telemetry"`
+	Weather   map[string]interface{} `json:"weather,omitempty"`
+	History   *HistoryResponse       `json:"history,omitempty"`
+	Timestamp time.Time              `json:"timestamp"`
+}
+

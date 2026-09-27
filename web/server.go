@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"renology/models"
@@ -25,12 +26,18 @@ type ServerConfig struct {
 	ListenAddr string
 	Storage    *storage.Storage
 	Verbose    bool
+	CloudRelay bool   // Running in cloud relay mode
+	CloudToken string // Authentication token for /api/telemetry/push
 }
 
 // Server serves the kiosk web UI and telemetry REST APIs.
 type Server struct {
-	config     ServerConfig
-	httpServer *http.Server
+	config        ServerConfig
+	httpServer    *http.Server
+	mu            sync.RWMutex
+	cachedLatest  *models.Telemetry
+	cachedWeather []byte
+	cachedHistory *models.HistoryResponse
 }
 
 // NewServer creates a new kiosk dashboard web server.
@@ -49,6 +56,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/history", s.handleHistory)
 	mux.HandleFunc("/api/history/recent", s.handleRecentHistory)
+	mux.HandleFunc("/api/telemetry/push", s.handlePushTelemetry)
 	mux.HandleFunc("/api/weather", s.handleWeather)
 	mux.HandleFunc("/api/health", s.handleHealth)
 
@@ -108,6 +116,15 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
+	s.mu.RLock()
+	cached := s.cachedLatest
+	s.mu.RUnlock()
+
+	if cached != nil {
+		_ = json.NewEncoder(w).Encode(cached)
+		return
+	}
+
 	if s.config.Storage == nil {
 		http.Error(w, `{"error":"storage not initialized"}`, http.StatusInternalServerError)
 		return
@@ -131,6 +148,15 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	s.mu.RLock()
+	cachedHistory := s.cachedHistory
+	s.mu.RUnlock()
+
+	if cachedHistory != nil {
+		_ = json.NewEncoder(w).Encode(cachedHistory)
+		return
+	}
 
 	if s.config.Storage == nil {
 		http.Error(w, `{"error":"storage not initialized"}`, http.StatusInternalServerError)
@@ -179,11 +205,23 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`{"status":"ok","time":"` + time.Now().Format(time.RFC3339) + `"}`))
 }
 
-// handleWeather proxies telemetry from the local weather station HTTP server (port 8088).
+// handleWeather proxies telemetry from the local weather station HTTP server (port 8088),
+// or returns cached weather data when running in cloud relay mode.
 func (s *Server) handleWeather(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	s.mu.RLock()
+	cached := s.cachedWeather
+	s.mu.RUnlock()
+
+	// If running in cloud relay mode and we have cached weather, serve it immediately
+	if s.config.CloudRelay && cached != nil {
+		w.WriteHeader(http.StatusOK)
+		w.Write(cached)
+		return
+	}
 
 	client := http.Client{
 		Timeout: 2 * time.Second,
@@ -191,6 +229,12 @@ func (s *Server) handleWeather(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := client.Get("http://127.0.0.1:8088/api/weather/current")
 	if err != nil {
+		// If local weather service unreachable but we have cached weather, serve cached
+		if cached != nil {
+			w.WriteHeader(http.StatusOK)
+			w.Write(cached)
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"offline","error":"weather service unreachable","measurements":{}}`))
 		return
@@ -207,3 +251,59 @@ func (s *Server) handleWeather(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(resp.StatusCode)
 	w.Write(body)
 }
+
+// handlePushTelemetry ingests live telemetry and weather pushed from the edge Surface Go 2.
+func (s *Server) handlePushTelemetry(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"POST method required"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Validate authorization token if configured
+	if s.config.CloudToken != "" {
+		token := r.Header.Get("X-Renology-Token")
+		if token == "" {
+			authHeader := r.Header.Get("Authorization")
+			token = strings.TrimPrefix(authHeader, "Bearer ")
+		}
+		if token != s.config.CloudToken {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+	}
+
+	var payload models.CloudSyncPayload
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"invalid json: %s"}`, err), http.StatusBadRequest)
+		return
+	}
+
+	s.mu.Lock()
+	if payload.Telemetry != nil {
+		s.cachedLatest = payload.Telemetry
+	}
+	if payload.Weather != nil {
+		if wBytes, err := json.Marshal(payload.Weather); err == nil {
+			s.cachedWeather = wBytes
+		}
+	}
+	if payload.History != nil {
+		s.cachedHistory = payload.History
+	}
+	s.mu.Unlock()
+
+	// If storage engine is active, persist the telemetry record to SQLite
+	if s.config.Storage != nil && payload.Telemetry != nil {
+		_ = s.config.Storage.Save(payload.Telemetry)
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":      "ok",
+		"received_at": time.Now().Format(time.RFC3339),
+	})
+}
+
