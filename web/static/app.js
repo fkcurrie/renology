@@ -15,6 +15,9 @@
 
   // --- DOM Elements ---
   const elClock = document.getElementById('clockDisplay');
+  const elHeartbeatContainer = document.getElementById('heartbeatContainer');
+  const elHeartbeatIcon = document.getElementById('heartbeatIcon');
+  const elHeartbeatLabel = document.getElementById('heartbeatLabel');
   const elDeviceName = document.getElementById('deviceName');
   const elModel = document.getElementById('controllerModel');
   const elBattType = document.getElementById('batteryTypeBadge');
@@ -457,13 +460,49 @@
   }
 
   // =========================================================================
+  // CONNECTION STATUS (HEARTBEAT VS ALARM BELL)
+  // =========================================================================
+  function updateConnectionStatus(isOnline, lastTime) {
+    if (!elHeartbeatContainer || !elHeartbeatIcon || !elHeartbeatLabel) return;
+    if (isOnline) {
+      elHeartbeatContainer.className = 'connection-heartbeat online';
+      elHeartbeatIcon.textContent = '❤️';
+      elHeartbeatIcon.className = 'heartbeat-icon beating';
+      elHeartbeatLabel.textContent = 'LINK ACTIVE';
+      elHeartbeatContainer.title = `Bluetooth Link Active • Last packet: ${lastTime || 'just now'}`;
+    } else {
+      elHeartbeatContainer.className = 'connection-heartbeat offline';
+      elHeartbeatIcon.textContent = '🔔';
+      elHeartbeatIcon.className = 'heartbeat-icon alarm';
+      elHeartbeatLabel.textContent = 'LINK DOWN';
+      elHeartbeatContainer.title = 'Bluetooth Link Interrupted — No response from controller';
+    }
+  }
+
+  // =========================================================================
   // API FETCH & REAL-TIME POLLING
   // =========================================================================
   async function fetchStatus() {
     try {
       const resp = await fetch('/api/status');
-      if (!resp.ok) return;
+      if (!resp.ok) {
+        updateConnectionStatus(false);
+        return;
+      }
       const t = await resp.json();
+
+      // Check packet freshness (< 18 seconds)
+      let isFresh = false;
+      let syncStr = '';
+      if (t.timestamp) {
+        const syncDate = new Date(t.timestamp);
+        const ageSec = (Date.now() - syncDate.getTime()) / 1000;
+        syncStr = syncDate.toLocaleTimeString();
+        if (ageSec < 18) {
+          isFresh = true;
+        }
+      }
+      updateConnectionStatus(isFresh, syncStr);
 
       // Update Device Header
       if (t.device_name) elDeviceName.textContent = t.device_name;
@@ -519,7 +558,21 @@
       if (t.rssi) {
         elRssi.textContent = `${t.rssi} dBm`;
       }
+
+      // Update Live Sync Status Indicator
+      const elLastUpdated = document.getElementById('lastUpdatedText');
+      const elPulse = document.getElementById('blePulse');
+      if (elLastUpdated && t.timestamp) {
+        const d = new Date(t.timestamp);
+        elLastUpdated.textContent = `Live Telemetry Synced: ${d.toLocaleTimeString()} (5s BLE loop • PV: ${(t.pv_voltage_v || 0).toFixed(1)}V)`;
+      }
+      if (elPulse) {
+        elPulse.style.animation = 'none';
+        void elPulse.offsetWidth; // trigger reflow
+        elPulse.style.animation = 'pulse-animation 1.5s ease-in-out';
+      }
     } catch (err) {
+      updateConnectionStatus(false);
       console.warn('Status poll error:', err);
     }
   }
