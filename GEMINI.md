@@ -112,6 +112,23 @@ sudo hciconfig hci0 up
 bluetoothctl power on
 ```
 
+### 3.3 BlueZ vs. Direct HCI in Go (Architecture Analysis)
+When implementing BLE in Go on Linux, developers face a choice between two foundational architectures:
+
+| Parameter | BlueZ via D-Bus (`tinygo.org/x/bluetooth`) | Direct Raw HCI Sockets (`github.com/go-ble/ble`) |
+| :--- | :--- | :--- |
+| **Linux Layer** | User-space `bluetoothd` daemon over D-Bus IPC | Direct `AF_BLUETOOTH` kernel raw socket (`HCI_CHANNEL_RAW`) |
+| **Permissions** | **Unprivileged (Non-Root)** | **Requires Root** or `CAP_NET_RAW` / `CAP_NET_ADMIN` |
+| **System Coexistence** | Seamless (works alongside BT mouse, keyboard, audio) | Exclusive: Resets adapter (`HCI Reset`), disrupts desktop BT |
+| **Connection Behavior** | Sends `LE Extended Create Connection` + `LL_FEATURE_REQ` | Sends standard `LE_Create_Connection` (avoids feature abort) |
+| **Fringe Signal Link** | Aborts in 270ms if remote feature response missed | Link layer succeeds; application ATT then drops if RSSI < -94 dBm |
+| **Best Used For** | Laptops, desktop Linux, general distribution | Dedicated headless SBCs (Raspberry Pi), embedded appliances |
+
+**Conclusion & Strategy**:
+1. Neither BlueZ nor direct HCI can circumvent the laws of RF physics: at -101 dBm, the CC2541 chip's receiver (-94 dBm floor) cannot decode incoming packets reliably.
+2. `tinygo.org/x/bluetooth` remains the recommended primary engine for Renology because it runs without root privileges, integrates cleanly with system services, and works across Linux, macOS, and Windows.
+3. Direct raw HCI is documented as a viable alternative for dedicated embedded appliances where `bluetoothd` is disabled.
+
 ---
 
 ## 4. Modbus RTU Over BLE Protocol Reference
