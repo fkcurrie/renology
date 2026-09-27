@@ -45,13 +45,31 @@
       </div>
     </header>
 
+    <!-- Plain-English Human Story Banner -->
+    <div class="human-story-banner" id="humanStoryBanner">
+      <div class="story-left">
+        <span class="story-pulse-dot" id="storyPulseDot"></span>
+        <span class="story-icon" id="storyIcon">☀️</span>
+        <div class="story-text-container">
+          <span class="story-headline" id="storyHeadline">BATTERY 100% FULL • SOLAR ON STANDBY</span>
+          <span class="story-desc" id="storyDesc">The sun is shining bright! Since your battery tank is completely full, solar charging is resting until you turn appliances on.</span>
+        </div>
+      </div>
+      <div class="story-right">
+        <div class="story-pill" id="storyEquivPill">
+          <span class="story-pill-icon">⚡</span>
+          <span class="story-pill-text" id="storyEquivText">Today: ~6 Phone Charges</span>
+        </div>
+      </div>
+    </div>
+
     <!-- Main Gauge & Metrics Grid -->
     <main class="dashboard-grid">
       <!-- Card 1: Automotive Battery Fuel Dial -->
       <section class="card battery-card">
         <div class="card-header">
           <div class="card-icon battery-icon">🔋</div>
-          <h2>BATTERY CHARGE</h2>
+          <h2>BATTERY TANK</h2>
           <span class="badge" id="batteryTypeBadge">Lithium (LFP)</span>
         </div>
 
@@ -73,7 +91,7 @@
             <span class="metric-val" id="battCurrentVal">0.00<span class="unit">A</span></span>
           </div>
           <div class="metric-item">
-            <span class="metric-label">POWER</span>
+            <span class="metric-label">NET POWER</span>
             <span class="metric-val" id="battPowerVal">0.0<span class="unit">W</span></span>
           </div>
         </div>
@@ -83,16 +101,16 @@
       <section class="card solar-card">
         <div class="card-header">
           <div class="card-icon solar-icon">⚡</div>
-          <h2>PANEL SPEEDOMETER</h2>
-          <span class="badge mppt-badge" id="chargingStateBadge">MPPT Active</span>
-          <span class="badge curtailment-badge throttled" id="curtailmentBadge">☀️ Full Sun • Throttled</span>
+          <h2>SUN POWER & SPEEDOMETER</h2>
+          <span class="badge mppt-badge" id="chargingStateBadge">Smart Solar Active</span>
+          <span class="badge curtailment-badge throttled" id="curtailmentBadge">☀️ Full Sun • Tank Full</span>
         </div>
 
         <div class="gauge-wrapper speedometer-wrapper">
           <canvas id="speedometerCanvas" width="340" height="240"></canvas>
           <div class="speedometer-center-readout">
             <div class="speedo-speed" id="speedoVoltsVal">36.1<span class="unit">V</span></div>
-            <div class="speedo-label">VOLTS DC</div>
+            <div class="speedo-label">SUN PRESSURE (V)</div>
           </div>
         </div>
 
@@ -103,7 +121,7 @@
             <span class="potential-val" id="actualHarvestVal">21 W</span>
           </div>
           <div class="curtailment-indicator" id="curtailmentIndicator">
-            <span class="curtailment-tag" id="curtailmentTag">93% THROTTLED (BATTERY FULL)</span>
+            <span class="curtailment-tag" id="curtailmentTag">TANK FULL • 98% SOLAR STANDBY</span>
             <div class="curtailment-bar-bg">
               <div class="curtailment-bar-fill" id="curtailmentBarFill" style="width: 7%;"></div>
             </div>
@@ -116,7 +134,7 @@
 
         <div class="metrics-row speedo-odometer-row">
           <div class="metric-item">
-            <span class="metric-label">SOLAR POWER</span>
+            <span class="metric-label">SOLAR HARVEST</span>
             <span class="metric-val highlight-val" id="solarPowerVal">0<span class="unit">W</span></span>
           </div>
           <div class="metric-item">
@@ -131,7 +149,7 @@
 
         <div class="lifetime-row">
           <span>LIFETIME: <strong id="lifetimeKwhVal">9,746 kWh</strong></span>
-          <span class="speedo-redline-tag">100V MAX VOC</span>
+          <span class="speedo-redline-tag">SAFE RANGE (&lt;100V)</span>
         </div>
       </section>
 
@@ -156,7 +174,7 @@
           <div class="sys-stat-box">
             <div class="stat-icon">🔋</div>
             <div class="stat-content">
-              <span class="stat-title">BATTERY</span>
+              <span class="stat-title">BATTERY TEMP</span>
               <span class="stat-number" id="battTempVal">24°C</span>
             </div>
           </div>
@@ -164,16 +182,16 @@
           <div class="sys-stat-box">
             <div class="stat-icon">💡</div>
             <div class="stat-content">
-              <span class="stat-title">DC LOAD</span>
-              <span class="stat-number" id="loadStatusVal">Off (0W)</span>
+              <span class="stat-title">APPLIANCES (DC)</span>
+              <span class="stat-number" id="loadStatusVal">Idle (0W)</span>
             </div>
           </div>
 
           <div class="sys-stat-box">
             <div class="stat-icon">🛡️</div>
             <div class="stat-content">
-              <span class="stat-title">FAULTS</span>
-              <span class="stat-number normal-status" id="faultCodeVal">0 (Normal)</span>
+              <span class="stat-title">HEALTH</span>
+              <span class="stat-number normal-status" id="faultCodeVal">0 (Healthy)</span>
             </div>
           </div>
         </div>
@@ -224,7 +242,7 @@
         <div class="chart-legend">
           <span class="legend-item"><span class="legend-dot solar-dot"></span> Solar Power (Watts)</span>
           <span class="legend-item"><span class="legend-dot soc-dot"></span> Battery Charge (%)</span>
-          <span class="legend-time" id="window24hLabel">24-Hour Solar Diurnal Cycle</span>
+          <span class="legend-time" id="window24hLabel">24-Hour Daylight & Solar Flow</span>
         </div>
       </section>
 

@@ -39,6 +39,14 @@
   const elHdrWeatherHum = document.getElementById('hdrWeatherHum');
   const elHdrWeatherSolar = document.getElementById('hdrWeatherSolar');
 
+  // Human Story Banner
+  const elHumanStoryBanner = document.getElementById('humanStoryBanner');
+  const elStoryPulseDot = document.getElementById('storyPulseDot');
+  const elStoryIcon = document.getElementById('storyIcon');
+  const elStoryHeadline = document.getElementById('storyHeadline');
+  const elStoryDesc = document.getElementById('storyDesc');
+  const elStoryEquivText = document.getElementById('storyEquivText');
+
   // Battery Card
   const elGaugeSoc = document.getElementById('gaugeSocVal');
   const elGaugeSub = document.getElementById('gaugeStatusSub');
@@ -735,6 +743,16 @@
         if (elWeatherSolarRad) elWeatherSolarRad.innerHTML = `${m.solar_radiation_wm2 || 0}<span class="unit">W/m²</span>`;
         if (elWeatherUv) elWeatherUv.textContent = `UV: ${m.uv_index || 0} • Rain: ${m.daily_rain_mm || 0}mm`;
         if (elWeatherStationSub) elWeatherStationSub.textContent = `EasyWeather DD85 (${data.updated_at || 'synced'})`;
+
+        if (lastTelemetry) {
+          updateSolarPotentialAndCurtailment(
+            lastTelemetry.pv_voltage_v,
+            lastTelemetry.pv_power_w,
+            lastTelemetry.battery_soc_percent,
+            lastTelemetry.max_charging_power_today_w
+          );
+          updateHumanNarrative(lastTelemetry);
+        }
       } else {
         // Standby or waiting for report
         if (elWeatherStatusBadge) {
@@ -788,9 +806,9 @@
       const effectivePot = Math.max(pvWatts + 20, sunPotentialW);
       const throttledPct = Math.min(98, Math.max(50, Math.round((1 - (pvWatts / effectivePot)) * 100)));
 
-      elCurtailmentBadge.textContent = '☀️ Full Sun • Throttled';
+      elCurtailmentBadge.textContent = '☀️ Full Sun • Tank Full';
       elCurtailmentBadge.className = 'badge curtailment-badge throttled';
-      elCurtailmentTag.textContent = `${throttledPct}% THROTTLED (BATTERY FULL)`;
+      elCurtailmentTag.textContent = `TANK FULL • ${throttledPct}% SOLAR STANDBY`;
       elCurtailmentTag.style.color = '#fbbf24';
       elActualHarvestVal.textContent = `${pvWatts} W`;
       elSunPotentialVal.textContent = `~${effectivePot} W`;
@@ -801,9 +819,9 @@
       const effectivePot = Math.max(pvWatts, sunPotentialW);
       const harvestPct = Math.min(100, Math.round((pvWatts / Math.max(1, effectivePot)) * 100));
 
-      elCurtailmentBadge.textContent = '⚡ Active MPPT Harvest';
+      elCurtailmentBadge.textContent = '⚡ Charging Battery';
       elCurtailmentBadge.className = 'badge curtailment-badge harvesting';
-      elCurtailmentTag.textContent = `HARVESTING ${harvestPct}%`;
+      elCurtailmentTag.textContent = `CHARGING AT ${pvWatts}W (${harvestPct}% SUN)`;
       elCurtailmentTag.style.color = '#34d399';
       elActualHarvestVal.textContent = `${pvWatts} W`;
       elSunPotentialVal.textContent = `~${effectivePot} W`;
@@ -813,12 +831,74 @@
       // Low sun / Night / Inactive
       elCurtailmentBadge.textContent = '🌙 Low Sun / Standby';
       elCurtailmentBadge.className = 'badge curtailment-badge night';
-      elCurtailmentTag.textContent = 'STANDBY (LOW SUN)';
+      elCurtailmentTag.textContent = 'RUNNING ON BATTERY STORAGE';
       elCurtailmentTag.style.color = '#94a3b8';
       elActualHarvestVal.textContent = `${pvWatts} W`;
       elSunPotentialVal.textContent = `0 W`;
       elCurtailmentBarFill.style.width = '0%';
       elCurtailmentBarFill.style.background = '#64748b';
+    }
+  }
+
+  function updateHumanNarrative(t) {
+    if (!elHumanStoryBanner) return;
+
+    const pvVolts = Number(t.pv_voltage_v) || 0;
+    const pvWatts = Number(t.pv_power_w) || 0;
+    const battSoc = Number(t.battery_soc_percent) || 0;
+    const battV = Number(t.battery_voltage_v) || 0;
+    const todayWh = Number(t.power_generation_today_wh) || 0;
+    const fault = Number(t.fault_code) || 0;
+
+    // Calculate relatable everyday equivalents
+    if (elStoryEquivText) {
+      if (todayWh >= 300) {
+        const laptopHrs = (todayWh / 65).toFixed(1);
+        elStoryEquivText.textContent = `Today: ~${laptopHrs}h Laptop Run (${todayWh}Wh)`;
+      } else if (todayWh >= 15) {
+        const phones = Math.max(1, Math.round(todayWh / 15));
+        elStoryEquivText.textContent = `Today: ~${phones} Phone Charges (${todayWh}Wh)`;
+      } else {
+        elStoryEquivText.textContent = `Today: Harvest Started (${todayWh}Wh)`;
+      }
+    }
+
+    // Determine narrative state
+    if (fault !== 0) {
+      elHumanStoryBanner.className = 'human-story-banner alert';
+      if (elStoryIcon) elStoryIcon.textContent = '⚠️';
+      if (elStoryHeadline) elStoryHeadline.textContent = `SYSTEM ALERT • CODE 0x${fault.toString(16).toUpperCase()}`;
+      if (elStoryDesc) elStoryDesc.textContent = 'Hardware fault detected on the solar charge controller. Check connection wiring.';
+    } else if (battSoc >= 95 && pvVolts >= 28 && pvWatts < 60) {
+      // Tank full in bright sun
+      elHumanStoryBanner.className = 'human-story-banner';
+      if (elStoryIcon) elStoryIcon.textContent = '☀️';
+      if (elStoryHeadline) elStoryHeadline.textContent = 'BATTERY TANK 100% FULL • SOLAR ON STANDBY';
+      if (elStoryDesc) elStoryDesc.textContent = 'Everything looks great! The sun is shining bright and your battery tank is topped up. Solar is resting on standby.';
+    } else if (battSoc >= 95 && pvWatts >= 60) {
+      // Tank full, powering active loads directly from sunlight
+      elHumanStoryBanner.className = 'human-story-banner charging';
+      if (elStoryIcon) elStoryIcon.textContent = '⚡';
+      if (elStoryHeadline) elStoryHeadline.textContent = 'POWERING APPLIANCES DIRECT FROM SUN';
+      if (elStoryDesc) elStoryDesc.textContent = `Battery is full! The sun is powering your appliances directly with ${pvWatts}W of free clean energy.`;
+    } else if (pvWatts >= 25 && battSoc < 95) {
+      // Active charging
+      elHumanStoryBanner.className = 'human-story-banner charging';
+      if (elStoryIcon) elStoryIcon.textContent = '⚡';
+      if (elStoryHeadline) elStoryHeadline.textContent = `ACTIVELY CHARGING BATTERY (${pvWatts}W)`;
+      if (elStoryDesc) elStoryDesc.textContent = `The solar panels are pouring ${pvWatts}W into your battery tank (currently ${battSoc}%).`;
+    } else if (pvVolts < 15 || (latestWeatherSolarRad !== null && latestWeatherSolarRad < 20)) {
+      // Night / resting
+      elHumanStoryBanner.className = 'human-story-banner night';
+      if (elStoryIcon) elStoryIcon.textContent = '🌙';
+      if (elStoryHeadline) elStoryHeadline.textContent = 'SUN HAS SET • RUNNING SMOOTHLY ON BATTERY';
+      if (elStoryDesc) elStoryDesc.textContent = `Panels are asleep for the night. Your battery has plenty of stored energy (${battSoc}%, ${battV.toFixed(1)}V).`;
+    } else {
+      // Daylight, but low solar / overcast
+      elHumanStoryBanner.className = 'human-story-banner';
+      if (elStoryIcon) elStoryIcon.textContent = '⛅';
+      if (elStoryHeadline) elStoryHeadline.textContent = 'OVERCAST / LOW SUN • TRICKLE CHARGE';
+      if (elStoryDesc) elStoryDesc.textContent = `Cloudy conditions outside. Harvesting ${pvWatts}W of diffuse daylight into the battery.`;
     }
   }
 
@@ -851,7 +931,13 @@
       if (t.device_name && elDeviceName) elDeviceName.textContent = t.device_name;
       if (t.model && elModel) elModel.textContent = t.model;
       if (t.battery_type && elBattType) elBattType.textContent = t.battery_type;
-      if (t.charging_status && elChargingState) elChargingState.textContent = `${t.charging_status} Active`;
+      if (t.charging_status && elChargingState) {
+        if (t.charging_status === 'MPPT') {
+          elChargingState.textContent = 'Smart Solar Active';
+        } else {
+          elChargingState.textContent = `${t.charging_status} Active`;
+        }
+      }
 
       if (t.rated_voltage_v && t.rated_current_a && elSystemRating) {
         elSystemRating.textContent = `${t.rated_current_a}A • ${t.rated_voltage_v}V System`;
@@ -888,7 +974,7 @@
         elLifetimeKwh.textContent = `${t.power_generation_total_kwh.toLocaleString()} kWh`;
       }
 
-      // Update Solar Potential & Curtailment Analytics
+      // Update Solar Potential, Curtailment & Human Story Analytics
       lastTelemetry = t;
       updateSolarPotentialAndCurtailment(
         t.pv_voltage_v,
@@ -896,15 +982,19 @@
         t.battery_soc_percent,
         t.max_charging_power_today_w
       );
+      updateHumanNarrative(t);
 
       // Update System Hardware
       if (elCtrlTemp) elCtrlTemp.textContent = `${t.controller_temp_c || 0}°C`;
       if (elBattTemp) elBattTemp.textContent = `${t.battery_temp_c || 0}°C`;
-      if (elLoadStatus) elLoadStatus.textContent = `${t.load_status || 'Off'} (${t.load_power_w || 0}W)`;
+      if (elLoadStatus) {
+        const isLoadOn = t.load_status === 'On' || (t.load_power_w && t.load_power_w > 0);
+        elLoadStatus.textContent = isLoadOn ? `Running (${t.load_power_w || 0}W)` : `Idle (0W)`;
+      }
 
       if (elFaultCode) {
         if (t.fault_code === 0) {
-          elFaultCode.textContent = '0 (Normal)';
+          elFaultCode.textContent = '0 (Healthy)';
           elFaultCode.className = 'stat-number normal-status';
         } else {
           elFaultCode.textContent = `Alert (0x${t.fault_code.toString(16)})`;
