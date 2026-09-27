@@ -8,6 +8,9 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"encoding/csv"
+	"io"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -22,12 +25,18 @@ func main() {
 	outputDir := flag.String("out", "./data", "Directory to store telemetry logs (JSONL, CSV, latest)")
 	deviceID := flag.Int("device-id", 255, "Modbus Device ID (default 255/0xFF for Renogy BT)")
 	simulate := flag.Bool("simulate", false, "Run in simulation mode for testing / offline verification")
+	showStatus := flag.Bool("status", false, "Print summary of RF survey and latest telemetry status")
 	verbose := flag.Bool("verbose", false, "Enable verbose packet-level debug output")
 	flag.Parse()
 
 	absOutDir, err := filepath.Abs(*outputDir)
 	if err != nil {
 		log.Fatalf("Invalid output directory: %v", err)
+	}
+
+	if *showStatus {
+		printStatusReport(absOutDir)
+		return
 	}
 
 	store, err := storage.NewStorage(absOutDir)
@@ -143,4 +152,101 @@ func runSimulator(ctx context.Context, interval time.Duration, store *storage.St
 			return
 		}
 	}
+}
+
+func printStatusReport(dataDir string) {
+	fmt.Println("=====================================================")
+	fmt.Println("  Renology RF Survey & Connection Status Report")
+	fmt.Println("=====================================================")
+
+	rfFile := filepath.Join(dataDir, "rf_survey.csv")
+	f, err := os.Open(rfFile)
+	if err != nil {
+		fmt.Printf("No RF survey data found yet at %s\n", rfFile)
+		return
+	}
+	defer f.Close()
+
+	r := csv.NewReader(f)
+	// Read header
+	_, err = r.Read()
+	if err != nil {
+		fmt.Println("Empty RF survey file.")
+		return
+	}
+
+	var count int
+	var minRSSI = 0
+	var maxRSSI = -999
+	var sumRSSI int
+	var successCount int
+	var latestTime string
+	var latestMAC string
+	var latestRSSI int
+	var latestErr string
+
+	for {
+		record, err := r.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil || len(record) < 6 {
+			continue
+		}
+
+		count++
+		latestTime = record[0]
+		latestMAC = record[1]
+		rssi, _ := strconv.Atoi(record[3])
+		conn := record[4] == "true"
+		latestErr = record[5]
+		latestRSSI = rssi
+
+		if count == 1 {
+			minRSSI = rssi
+			maxRSSI = rssi
+		} else {
+			if rssi < minRSSI {
+				minRSSI = rssi
+			}
+			if rssi > maxRSSI {
+				maxRSSI = rssi
+			}
+		}
+		sumRSSI += rssi
+
+		if conn {
+			successCount++
+		}
+	}
+
+	if count == 0 {
+		fmt.Println("No RF measurements recorded yet.")
+		return
+	}
+
+	avgRSSI := float64(sumRSSI) / float64(count)
+
+	fmt.Printf(" Target Device:        %s\n", latestMAC)
+	fmt.Printf(" Latest Sample Time:   %s\n", latestTime)
+	fmt.Printf(" Total Survey Samples: %d\n", count)
+	fmt.Printf(" Latest RSSI:          %d dBm\n", latestRSSI)
+	fmt.Printf(" Min / Max / Avg RSSI: %d / %d / %.1f dBm\n", minRSSI, maxRSSI, avgRSSI)
+	fmt.Printf(" Connection Successes: %d / %d\n", successCount, count)
+	if successCount == 0 {
+		fmt.Printf(" Last Link Error:      %s\n", latestErr)
+		fmt.Println(" Status Summary:       Fringe RF attenuation (< -94 dBm threshold).")
+		fmt.Println(" Action Needed:        Move laptop closer to solar controller (Target: -60 to -85 dBm).")
+	} else {
+		fmt.Println(" Status Summary:       CONNECTED! Live telemetry is streaming.")
+	}
+
+	// Check latest telemetry
+	latestPath := filepath.Join(dataDir, "latest_status.json")
+	if data, err := os.ReadFile(latestPath); err == nil && len(data) > 0 {
+		fmt.Println("-----------------------------------------------------")
+		fmt.Printf(" Latest Telemetry Snapshot (%s):\n", latestPath)
+		fmt.Println(string(data))
+	}
+	fmt.Println("=====================================================")
 }
