@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"encoding/csv"
 	"io"
+	"os/exec"
 	"strconv"
 	"syscall"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"renology/models"
 	"renology/renogy"
 	"renology/storage"
+	"renology/web"
 )
 
 func main() {
@@ -24,6 +26,9 @@ func main() {
 	pollSec := flag.Int("interval", 5, "Polling interval in seconds")
 	outputDir := flag.String("out", "./data", "Directory to store telemetry logs (JSONL, CSV, latest)")
 	deviceID := flag.Int("device-id", 255, "Modbus Device ID (default 255/0xFF for Renogy BT)")
+	httpAddr := flag.String("http", ":8080", "HTTP kiosk dashboard listen address (e.g. :8080, or \"\" to disable)")
+	kiosk := flag.Bool("kiosk", false, "Launch browser automatically in full-screen kiosk mode")
+	webOnly := flag.Bool("web-only", false, "Run only the kiosk web server without polling BLE")
 	simulate := flag.Bool("simulate", false, "Run in simulation mode for testing / offline verification")
 	showStatus := flag.Bool("status", false, "Print summary of RF survey and latest telemetry status")
 	verbose := flag.Bool("verbose", false, "Enable verbose packet-level debug output")
@@ -52,6 +57,11 @@ func main() {
 	fmt.Printf(" Modbus Device ID: 0x%02X (%d)\n", *deviceID, *deviceID)
 	fmt.Printf(" Simulation Mode:  %v\n", *simulate)
 	fmt.Printf(" Storage Dir:      %s\n", absOutDir)
+	if *httpAddr != "" {
+		fmt.Printf(" Kiosk Dashboard:  http://localhost%s\n", *httpAddr)
+		fmt.Printf(" Kiosk Fullscreen: %v\n", *kiosk)
+	}
+	fmt.Printf(" Web Only Mode:    %v\n", *webOnly)
 	fmt.Println(" Output Files:")
 	fmt.Printf("   - %s (append-only history)\n", filepath.Join(absOutDir, "renology_telemetry.jsonl"))
 	fmt.Printf("   - %s (live snapshot)\n", filepath.Join(absOutDir, "latest_status.json"))
@@ -69,7 +79,33 @@ func main() {
 		cancel()
 	}()
 
-	if *simulate {
+	// 1. Start embedded Kiosk Web Server if configured
+	if *httpAddr != "" {
+		webServer, err := web.NewServer(web.ServerConfig{
+			ListenAddr: *httpAddr,
+			Storage:    store,
+			Verbose:    *verbose,
+		})
+		if err != nil {
+			log.Fatalf("Failed to initialize web server: %v", err)
+		}
+
+		go func() {
+			if err := webServer.Start(ctx); err != nil {
+				log.Printf("[Web] Web server stopped: %v", err)
+			}
+		}()
+
+		if *kiosk {
+			go launchKioskBrowser("http://localhost" + *httpAddr)
+		}
+	}
+
+	// 2. Run Poller or Web-Only Mode
+	if *webOnly {
+		log.Println("[Renology] Running in web-only kiosk mode (BLE polling disabled). Press Ctrl+C to stop.")
+		<-ctx.Done()
+	} else if *simulate {
 		runSimulator(ctx, time.Duration(*pollSec)*time.Second, store, *targetMAC)
 	} else {
 		client := renogy.NewClient(renogy.ClientConfig{
@@ -86,6 +122,34 @@ func main() {
 	}
 
 	fmt.Println("Renology poller stopped.")
+}
+
+func launchKioskBrowser(url string) {
+	time.Sleep(800 * time.Millisecond) // Allow web server to bind socket
+
+	candidates := [][]string{
+		{"chromium", "--kiosk", "--noerrdialogs", "--disable-infobars", url},
+		{"chromium-browser", "--kiosk", "--noerrdialogs", "--disable-infobars", url},
+		{"google-chrome", "--kiosk", "--noerrdialogs", "--disable-infobars", url},
+		{"firefox", "--kiosk", url},
+		{"xdg-open", url},
+	}
+
+	for _, cmdArgs := range candidates {
+		bin, err := exec.LookPath(cmdArgs[0])
+		if err == nil {
+			log.Printf("[Kiosk] Launching kiosk display using %s (%s)", bin, url)
+			cmd := exec.Command(bin, cmdArgs[1:]...)
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			if err := cmd.Start(); err != nil {
+				log.Printf("[Kiosk] Warning: failed to start %s: %v", bin, err)
+				continue
+			}
+			return
+		}
+	}
+	log.Printf("[Kiosk] Note: No browser found to auto-launch kiosk. Open %s manually.", url)
 }
 
 func runSimulator(ctx context.Context, interval time.Duration, store *storage.Storage, mac string) {

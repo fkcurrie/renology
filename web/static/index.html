@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Renology Solar Kiosk</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
+</head>
+<body class="kiosk-mode">
+  <div class="kiosk-container">
+    <!-- Top Bar Navigation & Status -->
+    <header class="kiosk-header">
+      <div class="brand-group">
+        <div class="brand-logo">⚡</div>
+        <div>
+          <h1 class="brand-title">RENOLOGY</h1>
+          <div class="brand-subtitle">SOLAR ENERGY KIOSK</div>
+        </div>
+      </div>
+
+      <div class="header-center">
+        <div class="device-pill">
+          <span class="pulse-dot" id="blePulse"></span>
+          <span id="deviceName">BT-TH-66F984D6</span>
+          <span class="pill-divider">|</span>
+          <span id="controllerModel" class="model-badge">RNG-CTRL-RVR20</span>
+        </div>
+      </div>
+
+      <div class="header-controls">
+        <div class="clock-display" id="clockDisplay">12:00:00</div>
+        <button id="fullscreenBtn" class="kiosk-btn" title="Toggle Fullscreen">⛶ Fullscreen</button>
+      </div>
+    </header>
+
+    <!-- Main Gauge & Metrics Grid -->
+    <main class="dashboard-grid">
+      <!-- Card 1: Automotive Battery Fuel Dial -->
+      <section class="card battery-card">
+        <div class="card-header">
+          <div class="card-icon battery-icon">🔋</div>
+          <h2>BATTERY CHARGE</h2>
+          <span class="badge" id="batteryTypeBadge">Lithium (LFP)</span>
+        </div>
+
+        <div class="gauge-wrapper">
+          <canvas id="fuelGaugeCanvas" width="340" height="240"></canvas>
+          <div class="gauge-center-readout">
+            <div class="gauge-soc" id="gaugeSocVal">100<span class="unit">%</span></div>
+            <div class="gauge-status-sub" id="gaugeStatusSub">FULLY CHARGED</div>
+          </div>
+        </div>
+
+        <div class="metrics-row">
+          <div class="metric-item">
+            <span class="metric-label">VOLTAGE</span>
+            <span class="metric-val" id="battVoltageVal">13.2<span class="unit">V</span></span>
+          </div>
+          <div class="metric-item">
+            <span class="metric-label">CURRENT</span>
+            <span class="metric-val" id="battCurrentVal">0.00<span class="unit">A</span></span>
+          </div>
+          <div class="metric-item">
+            <span class="metric-label">POWER</span>
+            <span class="metric-val" id="battPowerVal">0.0<span class="unit">W</span></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Card 2: Solar PV Production -->
+      <section class="card solar-card">
+        <div class="card-header">
+          <div class="card-icon solar-icon">☀️</div>
+          <h2>SOLAR PV ARRAY</h2>
+          <span class="badge mppt-badge" id="chargingStateBadge">MPPT Active</span>
+        </div>
+
+        <div class="solar-main-display">
+          <div class="solar-power-huge" id="solarPowerVal">0</div>
+          <div class="solar-power-unit">WATTS GENERATING</div>
+        </div>
+
+        <div class="metrics-row">
+          <div class="metric-item">
+            <span class="metric-label">PANEL VOLTAGE</span>
+            <span class="metric-val" id="pvVoltageVal">30.5<span class="unit">V</span></span>
+          </div>
+          <div class="metric-item">
+            <span class="metric-label">PANEL CURRENT</span>
+            <span class="metric-val" id="pvCurrentVal">0.00<span class="unit">A</span></span>
+          </div>
+          <div class="metric-item">
+            <span class="metric-label">TODAY YIELD</span>
+            <span class="metric-val highlight-val" id="powerTodayVal">0<span class="unit">Wh</span></span>
+          </div>
+        </div>
+
+        <div class="lifetime-row">
+          <span>LIFETIME ENERGY:</span>
+          <strong id="lifetimeKwhVal">9,746 kWh</strong>
+        </div>
+      </section>
+
+      <!-- Card 3: Controller & System Thermals -->
+      <section class="card system-card">
+        <div class="card-header">
+          <div class="card-icon system-icon">⚙️</div>
+          <h2>SYSTEM HARDWARE</h2>
+          <span class="badge" id="systemRatingBadge">20A • 24V System</span>
+        </div>
+
+        <div class="system-stats-grid">
+          <div class="sys-stat-box">
+            <div class="stat-icon">🌡️</div>
+            <div class="stat-content">
+              <span class="stat-title">CONTROLLER TEMP</span>
+              <span class="stat-number" id="ctrlTempVal">23°C</span>
+            </div>
+          </div>
+
+          <div class="sys-stat-box">
+            <div class="stat-icon">🔋</div>
+            <div class="stat-content">
+              <span class="stat-title">BATTERY TEMP</span>
+              <span class="stat-number" id="battTempVal">24°C</span>
+            </div>
+          </div>
+
+          <div class="sys-stat-box">
+            <div class="stat-icon">💡</div>
+            <div class="stat-content">
+              <span class="stat-title">DC LOAD STATUS</span>
+              <span class="stat-number" id="loadStatusVal">Off (0W)</span>
+            </div>
+          </div>
+
+          <div class="sys-stat-box">
+            <div class="stat-icon">🛡️</div>
+            <div class="stat-content">
+              <span class="stat-title">HARDWARE FAULTS</span>
+              <span class="stat-number normal-status" id="faultCodeVal">0 (Normal)</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="system-footer-row">
+          <span class="rssi-label">BLUETOOTH SIGNAL:</span>
+          <span id="bleRssiVal" class="rssi-badge">Good (-93 dBm)</span>
+        </div>
+      </section>
+
+      <!-- Card 4: Last 24 Hours Solar Power Graph -->
+      <section class="card chart-card chart-24h">
+        <div class="card-header">
+          <div class="card-icon chart-icon">📈</div>
+          <h2>SOLAR POWER — LAST 24 HOURS</h2>
+          <span class="chart-summary-badge" id="peak24hBadge">Peak: 0 W</span>
+        </div>
+
+        <div class="chart-container">
+          <canvas id="chart24hCanvas"></canvas>
+          <div class="chart-tooltip" id="tooltip24h"></div>
+        </div>
+
+        <div class="chart-legend">
+          <span class="legend-item"><span class="legend-dot solar-dot"></span> Solar Power (Watts)</span>
+          <span class="legend-item"><span class="legend-dot soc-dot"></span> Battery Charge (%)</span>
+          <span class="legend-time" id="window24hLabel">24-Hour Solar Diurnal Cycle</span>
+        </div>
+      </section>
+
+      <!-- Card 5: Last 7 Days Solar Energy Graph -->
+      <section class="card chart-card chart-7d">
+        <div class="card-header">
+          <div class="card-icon chart-icon">📊</div>
+          <h2>SOLAR ENERGY — LAST 7 DAYS</h2>
+          <span class="chart-summary-badge" id="total7dBadge">7-Day Total: 0 Wh</span>
+        </div>
+
+        <div class="chart-container">
+          <canvas id="chart7dCanvas"></canvas>
+          <div class="chart-tooltip" id="tooltip7d"></div>
+        </div>
+
+        <div class="chart-legend">
+          <span class="legend-item"><span class="legend-dot bar-dot"></span> Daily Energy Yield (Wh)</span>
+          <span class="legend-item"><span class="legend-dot peak-dot"></span> Daily Peak Power (W)</span>
+          <span class="legend-time">Past 7 Calendar Days</span>
+        </div>
+      </section>
+    </main>
+
+    <!-- Footer Status -->
+    <footer class="kiosk-footer">
+      <div class="footer-left">
+        <span class="sync-indicator"></span>
+        <span id="lastUpdatedText">Updating live every 2 seconds via Bluetooth Low Energy</span>
+      </div>
+      <div class="footer-right">
+        <span>Renology Enterprise Solar Engine</span>
+      </div>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

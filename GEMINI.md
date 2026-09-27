@@ -19,21 +19,33 @@
 ├── go.sum                     # Cryptographic dependency checksums
 ├── main.go                    # CLI entrypoint, argument parsing, OS signal handling
 ├── models/
-│   └── types.go               # Telemetry struct, charging states, battery profiles
+│   ├── types.go               # Telemetry struct, charging states, battery profiles
+│   └── history.go             # 24h & 7d historical series and daily summary types
 ├── modbus/
 │   ├── crc.go                 # Modbus RTU CRC-16 calculation & validation
 │   └── crc_test.go            # Unit tests with verified Renogy byte sequences
 ├── renogy/
 │   ├── client.go              # BLE GATT connection, chunk reassembly, 5s polling loop
-│   ├── parser.go              # Telemetry & register decoder
+│   ├── parser.go              # Telemetry & register decoder (35-word / 75-byte frames)
 │   └── parser_test.go         # Comprehensive parser unit test suite
 ├── storage/
 │   ├── storage.go             # Triple-mode storage (JSONL time-series, latest.json, CSV)
-│   └── storage_test.go        # Storage engine unit tests
+│   ├── storage_test.go        # Storage engine unit tests
+│   ├── history.go             # 24h & 7d downsampling & diurnal aggregation
+│   └── history_test.go        # History engine unit tests
+├── web/
+│   ├── server.go              # HTTP server, REST API (/api/status, /api/history)
+│   ├── server_test.go         # Web server unit test suite
+│   └── static/
+│       ├── index.html         # High-contrast solar kiosk UI
+│       ├── style.css          # Anti-glare dark automotive theme
+│       └── app.js             # Automotive fuel dial canvas & 24h/7d charts
+├── start-kiosk.sh             # 1-click launcher for Linux Mint / Surface Go 2
 ├── data/                      # Local telemetry outputs (git-ignored)
 │   ├── renology_telemetry.jsonl
 │   ├── latest_status.json
-│   └── renology_history.csv
+│   ├── renology_history.csv
+│   └── rf_survey.csv
 ├── SOUL.md                    # Project mission, architectural manifesto & roadmap
 ├── GEMINI.md                  # This operational runbook & technical reference
 └── README.md                  # Public documentation & getting started guide
@@ -57,8 +69,17 @@ go build -o renology main.go
 
 ### 2.2 Execution
 ```bash
-# Run with default settings (5s poll, target MAC 60:98:66:F9:84:D6)
-./renology
+# Run daemon with poller and embedded kiosk web server (http://localhost:8080)
+./renology -mac 60:98:66:F9:84:D6 -interval 5 -out ./data -http :8080
+
+# Launch directly into full-screen kiosk mode on the Surface screen
+./renology -kiosk
+
+# 1-click bash launcher
+./start-kiosk.sh
+
+# Run in web-only mode (inspect data without polling BLE)
+./renology -web-only -http :8080
 
 # Run with custom parameters
 ./renology -mac 60:98:66:F9:84:D6 -interval 5 -out ./data -verbose

@@ -69,6 +69,29 @@ go build -o renology main.go
 
 ---
 
+## 🖥️ Kiosk Dashboard (Surface Go / Mobile / RV)
+
+Renology features an embedded, 100% offline kiosk dashboard compiled directly into the binary with zero external runtime or CDN dependencies.
+
+- **Automotive Fuel Gauge**: Realistic curved battery dial from **E** to **F** with damped needle physics, color-coded reserve zones, and digital readouts.
+- **Solar Power (Last 24 Hours)**: Interactive diurnal generation curve tracking sunrise, solar noon, and sunset.
+- **Solar Energy (Last 7 Days)**: Weekly solar yield comparison with daily kWh totals and peak generation Watts.
+- **Dual Mode**: View full-screen on the Surface Go display, or open `http://<surface-ip>:8080` from your phone or tablet on the local Wi-Fi.
+
+### Launch the Kiosk
+```bash
+# 1. Start poller + web dashboard on port 8080
+./renology -http :8080
+
+# 2. Or launch directly into fullscreen kiosk mode on Linux Mint / Surface
+./renology -kiosk
+
+# 3. Or use the 1-click launcher script
+./start-kiosk.sh
+```
+
+---
+
 ## ⚙️ Configuration & Flags
 
 | Flag | Default | Description |
@@ -77,6 +100,11 @@ go build -o renology main.go
 | `-interval` | `5` | Polling interval in seconds |
 | `-out` | `./data` | Directory to store JSONL, CSV, and latest status files |
 | `-device-id` | `255` | Modbus Device ID (`0xFF` broadcast or `0x01`) |
+| `-http` | `:8080` | HTTP kiosk dashboard listen address (or `""` to disable) |
+| `-kiosk` | `false` | Launch browser automatically in full-screen kiosk mode |
+| `-web-only` | `false` | Run only the web kiosk server without polling BLE |
+| `-simulate` | `false` | Run simulator with realistic telemetry |
+| `-status` | `false` | Print RF survey and link health summary |
 | `-verbose` | `false` | Enable verbose packet-level debug logging |
 
 ---
@@ -89,19 +117,22 @@ sequenceDiagram
     participant BLE as BlueZ / BT Adapter
     participant BT1 as Renogy BT-1 Dongle
     participant CC as Solar Charge Controller
+    participant UI as Kiosk UI (Surface / Phone)
 
     App->>BLE: Scan & Connect (GATT 0xFFD0)
     BLE->>BT1: LE Connection Established
     loop Every 5 Seconds
-        App->>BLE: Write Modbus Frame (0xFFD1): Read Reg 256
+        App->>BLE: Write Modbus Frame (0xFFD1): Read Reg 256 (35 words)
         BLE->>BT1: GATT Write Without Response
         BT1->>CC: RS-232 Modbus Request
-        CC->>BT1: Modbus Response (73 bytes)
-        BT1->>BLE: GATT Notifications (4x MTU chunks)
+        CC->>BT1: Modbus Response (75 bytes)
+        BT1->>BLE: GATT Notifications
         BLE->>App: Notification Stream
         App->>App: Reassemble Chunks & Verify CRC-16
         App->>App: Decode Telemetry (SOC, V, A, W, State)
         App->>App: Write JSONL, CSV, and latest.json
+        UI->>App: Poll /api/status & /api/history
+        App-->>UI: Live Metrics & Diurnal Curves
     end
 ```
 
@@ -112,7 +143,7 @@ sequenceDiagram
 - [x] Pure Go Modbus RTU frame builder, parser, and CRC-16 validator.
 - [x] High-frequency 5-second polling engine with auto-reconnect backoff.
 - [x] Multi-format local persistence (JSONL, CSV, atomic latest status).
-- [ ] **Phase 3**: Embedded real-time web dashboard with live dials and charts.
+- [x] **Phase 3**: Embedded real-time web dashboard with automotive battery fuel dial and 24h / 7d solar graphs.
 - [ ] **Phase 4**: MQTT publisher for Home Assistant native integration.
 - [ ] **Phase 5**: Prometheus `/metrics` exporter for Grafana dashboards.
 
