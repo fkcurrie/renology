@@ -26,6 +26,13 @@
           <span class="pill-divider">|</span>
           <span id="controllerModel" class="model-badge">RNG-CTRL-RVR20</span>
         </div>
+        <div class="header-weather-pill" id="hdrWeatherCapsule" title="Weather Station: 192.168.0.163:8088">
+          <span>⛅ <strong id="hdrWeatherTemp">--°C</strong></span>
+          <span class="pill-divider">|</span>
+          <span>💧 <span id="hdrWeatherHum">--%</span></span>
+          <span class="pill-divider">|</span>
+          <span>☀️ <strong id="hdrWeatherSolar">-- W/m²</strong></span>
+        </div>
       </div>
 
       <div class="header-controls">
@@ -72,23 +79,26 @@
         </div>
       </section>
 
-      <!-- Card 2: Solar PV Production -->
+      <!-- Card 2: Automotive Solar Panel Voltage Speedometer -->
       <section class="card solar-card">
         <div class="card-header">
-          <div class="card-icon solar-icon">☀️</div>
-          <h2>SOLAR PV ARRAY</h2>
+          <div class="card-icon solar-icon">⚡</div>
+          <h2>PANEL VOLTAGE SPEEDOMETER</h2>
           <span class="badge mppt-badge" id="chargingStateBadge">MPPT Active</span>
         </div>
 
-        <div class="solar-main-display">
-          <div class="solar-power-huge" id="solarPowerVal">0</div>
-          <div class="solar-power-unit">WATTS GENERATING</div>
+        <div class="gauge-wrapper speedometer-wrapper">
+          <canvas id="speedometerCanvas" width="340" height="240"></canvas>
+          <div class="speedometer-center-readout">
+            <div class="speedo-speed" id="speedoVoltsVal">36.1<span class="unit">V</span></div>
+            <div class="speedo-label">VOLTS DC</div>
+          </div>
         </div>
 
-        <div class="metrics-row">
+        <div class="metrics-row speedo-odometer-row">
           <div class="metric-item">
-            <span class="metric-label">PANEL VOLTAGE</span>
-            <span class="metric-val" id="pvVoltageVal">30.5<span class="unit">V</span></span>
+            <span class="metric-label">SOLAR POWER</span>
+            <span class="metric-val highlight-val" id="solarPowerVal">0<span class="unit">W</span></span>
           </div>
           <div class="metric-item">
             <span class="metric-label">PANEL CURRENT</span>
@@ -96,29 +106,30 @@
           </div>
           <div class="metric-item">
             <span class="metric-label">TODAY YIELD</span>
-            <span class="metric-val highlight-val" id="powerTodayVal">0<span class="unit">Wh</span></span>
+            <span class="metric-val" id="powerTodayVal">0<span class="unit">Wh</span></span>
           </div>
         </div>
 
         <div class="lifetime-row">
-          <span>LIFETIME ENERGY:</span>
-          <strong id="lifetimeKwhVal">9,746 kWh</strong>
+          <span>LIFETIME: <strong id="lifetimeKwhVal">9,746 kWh</strong></span>
+          <span class="speedo-redline-tag">100V MAX VOC</span>
         </div>
       </section>
 
-      <!-- Card 3: Controller & System Thermals -->
+      <!-- Card 3: Controller & Local Weather Station -->
       <section class="card system-card">
         <div class="card-header">
-          <div class="card-icon system-icon">⚙️</div>
-          <h2>SYSTEM HARDWARE</h2>
-          <span class="badge" id="systemRatingBadge">20A • 24V System</span>
+          <div class="card-icon system-icon">⛅</div>
+          <h2>SYSTEM & ENVIRONMENT</h2>
+          <span class="badge weather-badge" id="weatherStatusBadge">Station Standby</span>
         </div>
 
+        <!-- Controller Diagnostics -->
         <div class="system-stats-grid">
           <div class="sys-stat-box">
             <div class="stat-icon">🌡️</div>
             <div class="stat-content">
-              <span class="stat-title">CONTROLLER TEMP</span>
+              <span class="stat-title">CONTROLLER</span>
               <span class="stat-number" id="ctrlTempVal">23°C</span>
             </div>
           </div>
@@ -126,7 +137,7 @@
           <div class="sys-stat-box">
             <div class="stat-icon">🔋</div>
             <div class="stat-content">
-              <span class="stat-title">BATTERY TEMP</span>
+              <span class="stat-title">BATTERY</span>
               <span class="stat-number" id="battTempVal">24°C</span>
             </div>
           </div>
@@ -134,7 +145,7 @@
           <div class="sys-stat-box">
             <div class="stat-icon">💡</div>
             <div class="stat-content">
-              <span class="stat-title">DC LOAD STATUS</span>
+              <span class="stat-title">DC LOAD</span>
               <span class="stat-number" id="loadStatusVal">Off (0W)</span>
             </div>
           </div>
@@ -142,15 +153,39 @@
           <div class="sys-stat-box">
             <div class="stat-icon">🛡️</div>
             <div class="stat-content">
-              <span class="stat-title">HARDWARE FAULTS</span>
+              <span class="stat-title">FAULTS</span>
               <span class="stat-number normal-status" id="faultCodeVal">0 (Normal)</span>
             </div>
           </div>
         </div>
 
+        <!-- Weather Station Sensor Readings -->
+        <div class="weather-station-grid">
+          <div class="weather-box">
+            <span class="w-label">OUTDOOR TEMP</span>
+            <span class="w-val" id="weatherOutdoorTemp">--<span class="unit">°C</span></span>
+            <span class="w-sub" id="weatherTempF">--°F</span>
+          </div>
+          <div class="weather-box">
+            <span class="w-label">HUMIDITY</span>
+            <span class="w-val" id="weatherHumidity">--<span class="unit">%</span></span>
+            <span class="w-sub" id="weatherPressure">-- hPa</span>
+          </div>
+          <div class="weather-box">
+            <span class="w-label">WIND SPEED</span>
+            <span class="w-val" id="weatherWind">--<span class="unit">km/h</span></span>
+            <span class="w-sub" id="weatherGust">Gust: --</span>
+          </div>
+          <div class="weather-box highlight-solar">
+            <span class="w-label">SOLAR IRRADIANCE</span>
+            <span class="w-val" id="weatherSolarRad">--<span class="unit">W/m²</span></span>
+            <span class="w-sub" id="weatherUv">UV: --</span>
+          </div>
+        </div>
+
         <div class="system-footer-row">
-          <span class="rssi-label">BLUETOOTH SIGNAL:</span>
-          <span id="bleRssiVal" class="rssi-badge">Good (-93 dBm)</span>
+          <div><span class="rssi-label">BLE:</span> <span id="bleRssiVal" class="rssi-badge">-93 dBm</span></div>
+          <div><span class="rssi-label">WEATHER STATION:</span> <span id="weatherStationSub" class="rssi-badge">192.168.0.163:8088</span></div>
         </div>
       </section>
 

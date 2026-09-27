@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"net/http"
@@ -46,6 +47,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	// 1. API Endpoints
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/history", s.handleHistory)
+	mux.HandleFunc("/api/weather", s.handleWeather)
 	mux.HandleFunc("/api/health", s.handleHealth)
 
 	// 2. Embedded Static Assets
@@ -146,4 +148,33 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Write([]byte(`{"status":"ok","time":"` + time.Now().Format(time.RFC3339) + `"}`))
+}
+
+// handleWeather proxies telemetry from the local weather station HTTP server (port 8088).
+func (s *Server) handleWeather(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	client := http.Client{
+		Timeout: 2 * time.Second,
+	}
+
+	resp, err := client.Get("http://127.0.0.1:8088/api/weather/current")
+	if err != nil {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"offline","error":"weather service unreachable","measurements":{}}`))
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"error","error":"failed to read weather response","measurements":{}}`))
+		return
+	}
+
+	w.WriteHeader(resp.StatusCode)
+	w.Write(body)
 }

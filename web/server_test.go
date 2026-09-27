@@ -136,4 +136,17 @@ func TestWebServerEndpoints(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("Expected GET /api/health 200 OK, got %d", rec.Code)
 	}
+
+	// Test 7: GET /api/weather
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("GET", "/api/weather", nil)
+	server.httpServer.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected GET /api/weather 200 OK, got %d", rec.Code)
+	}
+	var weatherMap map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &weatherMap); err != nil {
+		t.Fatalf("Failed to parse /api/weather JSON: %v", err)
+	}
 }

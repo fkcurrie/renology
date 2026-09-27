@@ -31,12 +31,14 @@
 }
 
 html, body {
-  width: 100%;
-  height: 100%;
+  width: 100vw;
+  height: 100vh;
+  margin: 0;
+  padding: 0;
   background-color: var(--bg-primary);
   color: var(--text-main);
   font-family: var(--font-family);
-  overflow-x: hidden;
+  overflow: hidden;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -47,9 +49,13 @@ body.kiosk-mode {
 .kiosk-container {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
-  padding: 12px 18px;
-  gap: 12px;
+  width: 100vw;
+  height: 100vh;
+  max-height: 100vh;
+  padding: 8px 14px;
+  gap: 8px;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 /* Header */
@@ -60,8 +66,9 @@ body.kiosk-mode {
   background: var(--bg-secondary);
   border: 1px solid var(--bg-card-border);
   border-radius: 12px;
-  padding: 10px 20px;
+  padding: 6px 16px;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  flex-shrink: 0;
 }
 
 .brand-group {
@@ -118,6 +125,27 @@ body.kiosk-mode {
 .model-badge {
   color: var(--accent-cyan);
   font-weight: 700;
+}
+
+.header-weather-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(6, 182, 212, 0.1);
+  border: 1px solid rgba(6, 182, 212, 0.25);
+  border-radius: 20px;
+  padding: 4px 12px;
+  font-size: 11px;
+  color: #cbd5e1;
+}
+
+.header-weather-pill strong {
+  color: #fff;
+  font-family: var(--font-mono);
+}
+
+.header-weather-pill .weather-sub {
+  color: #94a3b8;
 }
 
 .pulse-dot {
@@ -241,38 +269,42 @@ body.kiosk-mode {
 .dashboard-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  grid-template-rows: auto 1fr;
-  gap: 14px;
-  flex: 1;
+  grid-template-rows: minmax(0, 1.15fr) minmax(0, 0.85fr);
+  gap: 10px;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 /* Cards Common */
 .card {
   background: var(--bg-card);
   border: 1px solid var(--bg-card-border);
-  border-radius: 14px;
-  padding: 16px;
+  border-radius: 12px;
+  padding: 10px 14px;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
   position: relative;
   overflow: hidden;
+  min-height: 0;
 }
 
 .card-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px;
+  margin-bottom: 6px;
+  flex-shrink: 0;
 }
 
 .card-header h2 {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
-  letter-spacing: 1.2px;
+  letter-spacing: 1.1px;
   color: var(--text-muted);
   flex: 1;
-  margin-left: 8px;
+  margin-left: 6px;
 }
 
 .card-icon {
@@ -389,76 +421,124 @@ body.kiosk-mode {
   color: var(--accent-gold);
 }
 
-/* Solar PV Card */
+/* Solar PV Card & Speedometer */
 .solar-card {
   border-top: 3px solid var(--accent-gold);
 }
 
-.solar-main-display {
+.speedometer-wrapper {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex: 1 1 0;
+  min-height: 0;
+  margin: 2px 0 6px 0;
+}
+
+#speedometerCanvas {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.speedometer-center-readout {
+  position: absolute;
+  bottom: 12px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  margin: 20px 0;
-  text-align: center;
+  pointer-events: none;
 }
 
-.solar-power-huge {
-  font-family: var(--font-mono);
-  font-size: 64px;
+.speedo-speed {
+  font-size: 34px;
   font-weight: 900;
-  color: #fbbf24;
+  font-family: var(--font-mono);
+  color: #fff;
   line-height: 1;
-  text-shadow: 0 0 24px var(--accent-gold-glow);
+  text-shadow: 0 0 16px rgba(245, 158, 11, 0.45);
 }
 
-.solar-power-unit {
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 2px;
+.speedo-speed .unit {
+  font-size: 18px;
   color: var(--accent-gold);
-  margin-top: 8px;
+  margin-left: 2px;
+}
+
+.speedo-label {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  color: var(--accent-gold);
+  margin-top: 2px;
+}
+
+.speedo-redline-tag {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.1);
+  padding: 1px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
 }
 
 .lifetime-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-dim);
-  padding: 8px 12px 0 12px;
+  padding: 6px 6px 0 6px;
+  flex-shrink: 0;
 }
 
 .lifetime-row strong {
   font-family: var(--font-mono);
   color: #e2e8f0;
-  font-size: 12px;
+  font-size: 11px;
 }
 
-/* System Hardware Card */
+/* System Hardware & Weather Card */
 .system-card {
   border-top: 3px solid var(--accent-cyan);
+}
+
+.weather-badge {
+  background: rgba(6, 182, 212, 0.15);
+  color: var(--accent-cyan);
+  border: 1px solid rgba(6, 182, 212, 0.3);
+}
+
+.weather-badge.online {
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--accent-emerald);
+  border-color: rgba(16, 185, 129, 0.4);
 }
 
 .system-stats-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 10px;
-  margin: 10px 0;
+  gap: 6px;
+  margin: 4px 0;
+  flex-shrink: 0;
 }
 
 .sys-stat-box {
   background: rgba(7, 11, 20, 0.6);
   border: 1px solid rgba(255, 255, 255, 0.05);
-  border-radius: 10px;
-  padding: 12px 10px;
+  border-radius: 8px;
+  padding: 8px 8px;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
 .stat-icon {
-  font-size: 20px;
+  font-size: 16px;
 }
 
 .stat-content {
@@ -467,7 +547,7 @@ body.kiosk-mode {
 }
 
 .stat-title {
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 700;
   letter-spacing: 0.8px;
   color: var(--text-dim);
@@ -476,7 +556,7 @@ body.kiosk-mode {
 
 .stat-number {
   font-family: var(--font-mono);
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 800;
   color: var(--text-main);
 }
@@ -485,15 +565,67 @@ body.kiosk-mode {
   color: var(--accent-emerald);
 }
 
+/* Weather Station Readings Grid */
+.weather-station-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+  margin: 4px 0 6px 0;
+  flex-shrink: 0;
+}
+
+.weather-box {
+  background: rgba(7, 11, 20, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+}
+
+.weather-box.highlight-solar {
+  border-color: rgba(245, 158, 11, 0.3);
+  background: rgba(245, 158, 11, 0.06);
+}
+
+.w-label {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  color: var(--text-dim);
+  margin-bottom: 2px;
+}
+
+.w-val {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 800;
+  color: #f8fafc;
+}
+
+.w-val .unit {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin-left: 2px;
+}
+
+.w-sub {
+  font-size: 9px;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+
 .system-footer-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-top: auto;
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-dim);
-  padding-top: 8px;
+  padding-top: 6px;
   border-top: 1px solid rgba(255, 255, 255, 0.05);
+  flex-shrink: 0;
 }
 
 .rssi-badge {
@@ -520,8 +652,9 @@ body.kiosk-mode {
 .chart-container {
   position: relative;
   width: 100%;
-  height: 220px;
-  margin: 8px 0;
+  flex: 1 1 0;
+  min-height: 0;
+  margin: 4px 0;
 }
 
 .chart-container canvas {
