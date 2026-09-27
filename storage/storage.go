@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"database/sql"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -16,6 +17,8 @@ import (
 type Storage struct {
 	mu           sync.Mutex
 	outputDir    string
+	dbPath       string
+	db           *sql.DB
 	jsonlPath    string
 	latestPath   string
 	csvPath      string
@@ -24,7 +27,7 @@ type Storage struct {
 	rfHeaderSet  bool
 }
 
-// NewStorage initializes storage files in the specified directory.
+// NewStorage initializes storage files and SQLite database in the specified directory.
 func NewStorage(dir string) (*Storage, error) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create storage dir: %w", err)
@@ -32,10 +35,16 @@ func NewStorage(dir string) (*Storage, error) {
 
 	s := &Storage{
 		outputDir:    dir,
+		dbPath:       filepath.Join(dir, "renology.db"),
 		jsonlPath:    filepath.Join(dir, "renology_telemetry.jsonl"),
 		latestPath:   filepath.Join(dir, "latest_status.json"),
 		csvPath:      filepath.Join(dir, "renology_history.csv"),
 		rfSurveyPath: filepath.Join(dir, "rf_survey.csv"),
+	}
+
+	// Initialize SQLite engine with WAL mode and tables
+	if err := s.initDB(); err != nil {
+		return nil, fmt.Errorf("failed to initialize sqlite database: %w", err)
 	}
 
 	// Check if CSV already has header
@@ -49,7 +58,17 @@ func NewStorage(dir string) (*Storage, error) {
 	return s, nil
 }
 
-// Save records a new telemetry reading to JSONL, updates latest_status.json, and appends to CSV.
+// Close gracefully closes the SQLite database connection.
+func (s *Storage) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db != nil {
+		return s.db.Close()
+	}
+	return nil
+}
+
+// Save records a new telemetry reading to SQLite, updates latest_status.json, appends to JSONL, and appends to CSV.
 func (s *Storage) Save(t *models.Telemetry) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -57,6 +76,9 @@ func (s *Storage) Save(t *models.Telemetry) error {
 	if t.Timestamp.IsZero() {
 		t.Timestamp = time.Now()
 	}
+
+	// 1. Insert into indexed SQLite database
+	_ = s.insertTelemetrySQL(t)
 
 	// 1. Append to JSON Lines
 	jsonData, err := json.Marshal(t)
@@ -132,7 +154,7 @@ func (s *Storage) Save(t *models.Telemetry) error {
 	return nil
 }
 
-// RecordRFMeasurement appends an RF advertisement and connection attempt log entry.
+// RecordRFMeasurement appends an RF advertisement and connection attempt log entry to SQLite and CSV.
 func (s *Storage) RecordRFMeasurement(t time.Time, mac, name string, rssi int, connected bool, errStr string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -140,6 +162,9 @@ func (s *Storage) RecordRFMeasurement(t time.Time, mac, name string, rssi int, c
 	if t.IsZero() {
 		t = time.Now()
 	}
+
+	// 1. Insert into SQLite rf_survey table
+	_ = s.insertRFMeasurementSQL(t, mac, name, rssi, connected, errStr)
 
 	f, err := os.OpenFile(s.rfSurveyPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {

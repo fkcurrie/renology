@@ -35,7 +35,20 @@ func (s *Storage) GetHistory(referenceTime time.Time) (*models.HistoryResponse, 
 		referenceTime = time.Now()
 	}
 
-	records := s.readAllTelemetryRecords()
+	var records []models.Telemetry
+	// 1. Try querying indexed SQLite database first
+	if s.db != nil {
+		startWindow := referenceTime.Add(-8 * 24 * time.Hour)
+		endWindow := referenceTime.Add(1 * time.Hour)
+		if sqlRecords, err := s.queryTelemetryRange(startWindow, endWindow); err == nil && len(sqlRecords) > 0 {
+			records = sqlRecords
+		}
+	}
+
+	// 2. Fallback to JSONL file if database was empty or not ready
+	if len(records) == 0 {
+		records = s.readAllTelemetryRecords()
+	}
 
 	// 1. Build 24-Hour Downsampled Series (15-minute buckets = 96 points)
 	points24h := s.build24hSeries(records, referenceTime)

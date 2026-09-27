@@ -48,6 +48,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to initialize storage: %v", err)
 	}
+	defer store.Close()
 
 	fmt.Println("=====================================================")
 	fmt.Println("  Renogy Solar Telemetry Poller (Go Native)")
@@ -62,10 +63,11 @@ func main() {
 		fmt.Printf(" Kiosk Fullscreen: %v\n", *kiosk)
 	}
 	fmt.Printf(" Web Only Mode:    %v\n", *webOnly)
-	fmt.Println(" Output Files:")
-	fmt.Printf("   - %s (append-only history)\n", filepath.Join(absOutDir, "renology_telemetry.jsonl"))
+	fmt.Println(" Output Files & Database:")
+	fmt.Printf("   - %s (scalable SQLite database)\n", filepath.Join(absOutDir, "renology.db"))
 	fmt.Printf("   - %s (live snapshot)\n", filepath.Join(absOutDir, "latest_status.json"))
-	fmt.Printf("   - %s (CSV spreadsheet)\n", filepath.Join(absOutDir, "renology_history.csv"))
+	fmt.Printf("   - %s (append-only history)\n", filepath.Join(absOutDir, "renology_telemetry.jsonl"))
+	fmt.Printf("   - %s (CSV export)\n", filepath.Join(absOutDir, "renology_history.csv"))
 	fmt.Println("=====================================================")
 
 	ctx, cancel := context.WithCancel(context.Background())

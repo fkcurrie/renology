@@ -29,12 +29,13 @@
 │   ├── parser.go              # Telemetry & register decoder (35-word / 75-byte frames)
 │   └── parser_test.go         # Comprehensive parser unit test suite
 ├── storage/
-│   ├── storage.go             # Triple-mode storage (JSONL time-series, latest.json, CSV)
-│   ├── storage_test.go        # Storage engine unit tests
+│   ├── db.go                  # SQLite storage engine (WAL mode, indexes, schema migrations)
+│   ├── storage.go             # Storage coordinator (SQLite, latest.json, JSONL backup, CSV)
+│   ├── storage_test.go        # Storage engine unit tests (SQLite & CSV migration)
 │   ├── history.go             # 24h & 7d downsampling & diurnal aggregation
 │   └── history_test.go        # History engine unit tests
 ├── web/
-│   ├── server.go              # HTTP server, REST API (/api/status, /api/history)
+│   ├── server.go              # HTTP server, REST API (/api/status, /api/history, /api/weather)
 │   ├── server_test.go         # Web server unit test suite
 │   └── static/
 │       ├── index.html         # High-contrast solar kiosk UI
@@ -42,10 +43,12 @@
 │       └── app.js             # Automotive fuel dial canvas & 24h/7d charts
 ├── start-kiosk.sh             # 1-click launcher for Linux Mint / Surface Go 2
 ├── data/                      # Local telemetry outputs (git-ignored)
-│   ├── renology_telemetry.jsonl
-│   ├── latest_status.json
-│   ├── renology_history.csv
-│   └── rf_survey.csv
+│   ├── renology.db            # Embedded SQLite database (WAL mode, indexed time-series)
+│   ├── renology.db-wal        # SQLite Write-Ahead Log
+│   ├── latest_status.json     # Live telemetry snapshot
+│   ├── renology_telemetry.jsonl # Append-only raw backup
+│   ├── renology_history.csv   # CSV export format
+│   └── rf_survey.csv          # RF signal link survey log
 ├── SOUL.md                    # Project mission, architectural manifesto & roadmap
 ├── GEMINI.md                  # This operational runbook & technical reference
 └── README.md                  # Public documentation & getting started guide

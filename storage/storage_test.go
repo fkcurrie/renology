@@ -56,6 +56,24 @@ func TestStorageSave(t *testing.T) {
 		t.Fatalf("CSV missing or empty")
 	}
 
+	// Verify SQLite database
+	dbData, err := os.ReadFile(filepath.Join(tempDir, "renology.db"))
+	if err != nil || len(dbData) == 0 {
+		t.Fatalf("SQLite database missing or empty")
+	}
+
+	// Verify GetDBStats
+	count, size, err := s.GetDBStats()
+	if err != nil {
+		t.Fatalf("GetDBStats failed: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("Expected 1 record in SQLite, got %d", count)
+	}
+	if size == 0 {
+		t.Errorf("Expected positive db file size, got %d", size)
+	}
+
 	// Verify RecordRFMeasurement
 	if err := s.RecordRFMeasurement(time.Now(), "60:98:66:F9:84:D6", "BT-TH-66F984D6", -88, true, ""); err != nil {
 		t.Fatalf("RecordRFMeasurement error: %v", err)
@@ -64,5 +82,41 @@ func TestStorageSave(t *testing.T) {
 	rfData, err := os.ReadFile(filepath.Join(tempDir, "rf_survey.csv"))
 	if err != nil || len(rfData) == 0 {
 		t.Fatalf("rf_survey.csv missing or empty")
+	}
+
+	if err := s.Close(); err != nil {
+		t.Fatalf("Storage.Close failed: %v", err)
+	}
+}
+
+func TestLegacyCSVMigration(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "renology_csv_test_*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Create a dummy CSV file
+	csvContent := `timestamp,device_name,mac_address,model,battery_type,rated_voltage_v,rated_current_a,battery_soc,battery_v,battery_a,battery_w,controller_temp_c,battery_temp_c,charging_status,pv_v,pv_a,pv_w,load_status,load_v,load_a,load_w,power_gen_today_wh,power_gen_total_kwh,fault_code
+2026-09-27T08:00:00Z,BT-TH-66F984D6,60:98:66:F9:84:D6,RNG-CTRL-RVR20,Lithium,24,20,95,13.20,5.00,66.0,24,24,MPPT,28.50,2.50,71,Off,0.00,0.00,0,120,500.0,0
+2026-09-27T09:00:00Z,BT-TH-66F984D6,60:98:66:F9:84:D6,RNG-CTRL-RVR20,Lithium,24,20,99,13.40,8.00,107.2,26,25,MPPT,32.00,3.50,112,Off,0.00,0.00,0,250,500.2,0
+`
+	if err := os.WriteFile(filepath.Join(tempDir, "renology_history.csv"), []byte(csvContent), 0644); err != nil {
+		t.Fatalf("Failed to write mock CSV: %v", err)
+	}
+
+	// Initializing Storage should auto-migrate the 2 CSV records into SQLite
+	s, err := NewStorage(tempDir)
+	if err != nil {
+		t.Fatalf("NewStorage failed: %v", err)
+	}
+	defer s.Close()
+
+	count, _, err := s.GetDBStats()
+	if err != nil {
+		t.Fatalf("GetDBStats failed: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("Expected 2 records migrated into SQLite, got %d", count)
 	}
 }
