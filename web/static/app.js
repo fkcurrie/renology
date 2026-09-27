@@ -20,6 +20,8 @@
   let displayedPvVolts = 0; // for smooth speedometer needle animation
   let historyData = null;
   let isFullscreen = false;
+  let latestWeatherSolarRad = null;
+  let lastTelemetry = null;
 
   // --- DOM Elements ---
   const elClock = document.getElementById('clockDisplay');
@@ -51,6 +53,13 @@
   const elPvA = document.getElementById('pvCurrentVal');
   const elPowerToday = document.getElementById('powerTodayVal');
   const elLifetimeKwh = document.getElementById('lifetimeKwhVal');
+
+  // Solar Potential & Curtailment
+  const elCurtailmentBadge = document.getElementById('curtailmentBadge');
+  const elActualHarvestVal = document.getElementById('actualHarvestVal');
+  const elCurtailmentTag = document.getElementById('curtailmentTag');
+  const elCurtailmentBarFill = document.getElementById('curtailmentBarFill');
+  const elSunPotentialVal = document.getElementById('sunPotentialVal');
 
   // System & Environment Card
   const elCtrlTemp = document.getElementById('ctrlTempVal');
@@ -705,6 +714,18 @@
         if (elHdrWeatherHum) elHdrWeatherHum.textContent = `${m.outdoor_humidity_pct}%`;
         if (elHdrWeatherSolar) elHdrWeatherSolar.textContent = `${m.solar_radiation_wm2 ?? '--'} W/m²`;
 
+        if (m.solar_radiation_wm2 !== undefined && m.solar_radiation_wm2 !== null) {
+          latestWeatherSolarRad = Number(m.solar_radiation_wm2);
+          if (lastTelemetry) {
+            updateSolarPotentialAndCurtailment(
+              lastTelemetry.pv_voltage_v,
+              lastTelemetry.pv_power_w,
+              lastTelemetry.battery_soc_percent,
+              lastTelemetry.max_charging_power_today_w
+            );
+          }
+        }
+
         if (elWeatherOutdoorTemp) elWeatherOutdoorTemp.innerHTML = `${m.outdoor_temperature_c}<span class="unit">°C</span>`;
         if (elWeatherTempF) elWeatherTempF.textContent = `${m.outdoor_temperature_f || '--'}°F`;
         if (elWeatherHumidity) elWeatherHumidity.innerHTML = `${m.outdoor_humidity_pct}<span class="unit">%</span>`;
@@ -727,6 +748,77 @@
       }
     } catch (err) {
       console.warn('Weather fetch error:', err);
+    }
+  }
+
+  // =========================================================================
+  // SOLAR POTENTIAL & CURTAILMENT ANALYTICS
+  // =========================================================================
+  function updateSolarPotentialAndCurtailment(pvVolts, pvWatts, battSoc, maxChargingToday) {
+    if (!elCurtailmentBadge || !elActualHarvestVal || !elCurtailmentTag || !elCurtailmentBarFill || !elSunPotentialVal) return;
+
+    pvVolts = Number(pvVolts) || 0;
+    pvWatts = Number(pvWatts) || 0;
+    battSoc = Number(battSoc) || 0;
+    maxChargingToday = Number(maxChargingToday) || 286;
+
+    // Nominal array rating: ~320W peak based on Rover 20 and 2-panel string
+    const arrayCapacityW = Math.max(300, maxChargingToday);
+
+    // Calculate Sun Potential Power:
+    let sunPotentialW = 0;
+    if (latestWeatherSolarRad !== null && latestWeatherSolarRad > 0) {
+      // 1000 W/m² = STC full sun (100% array capacity)
+      sunPotentialW = Math.round((latestWeatherSolarRad / 1000) * arrayCapacityW);
+      // Floor under high panel voltage (if panels are at 38V+, sun is direct)
+      if (pvVolts >= 38) {
+        sunPotentialW = Math.max(sunPotentialW, Math.round(arrayCapacityW * 0.85));
+      }
+    } else {
+      // Voltage heuristic fallback
+      if (pvVolts >= 38) sunPotentialW = Math.round(arrayCapacityW * 0.90);
+      else if (pvVolts >= 32) sunPotentialW = Math.round(arrayCapacityW * 0.60);
+      else if (pvVolts >= 20) sunPotentialW = Math.round(arrayCapacityW * 0.30);
+      else sunPotentialW = 0;
+    }
+
+    // Determine Curtailment State
+    if (pvVolts >= 28 && battSoc >= 95 && pvWatts < 60) {
+      // Battery is full (>95%) with high PV voltage, but controller is throttled
+      const effectivePot = Math.max(pvWatts + 20, sunPotentialW);
+      const throttledPct = Math.min(98, Math.max(50, Math.round((1 - (pvWatts / effectivePot)) * 100)));
+
+      elCurtailmentBadge.textContent = '☀️ Full Sun • Throttled';
+      elCurtailmentBadge.className = 'badge curtailment-badge throttled';
+      elCurtailmentTag.textContent = `${throttledPct}% THROTTLED (BATTERY FULL)`;
+      elCurtailmentTag.style.color = '#fbbf24';
+      elActualHarvestVal.textContent = `${pvWatts} W`;
+      elSunPotentialVal.textContent = `~${effectivePot} W`;
+      elCurtailmentBarFill.style.width = `${Math.max(5, Math.round((pvWatts / effectivePot) * 100))}%`;
+      elCurtailmentBarFill.style.background = 'linear-gradient(90deg, #f59e0b, #ef4444)';
+    } else if (pvWatts >= 60 || (pvWatts > 10 && battSoc < 95)) {
+      // Actively harvesting MPPT power into battery/load
+      const effectivePot = Math.max(pvWatts, sunPotentialW);
+      const harvestPct = Math.min(100, Math.round((pvWatts / Math.max(1, effectivePot)) * 100));
+
+      elCurtailmentBadge.textContent = '⚡ Active MPPT Harvest';
+      elCurtailmentBadge.className = 'badge curtailment-badge harvesting';
+      elCurtailmentTag.textContent = `HARVESTING ${harvestPct}%`;
+      elCurtailmentTag.style.color = '#34d399';
+      elActualHarvestVal.textContent = `${pvWatts} W`;
+      elSunPotentialVal.textContent = `~${effectivePot} W`;
+      elCurtailmentBarFill.style.width = `${harvestPct}%`;
+      elCurtailmentBarFill.style.background = 'linear-gradient(90deg, #10b981, #06b6d4)';
+    } else {
+      // Low sun / Night / Inactive
+      elCurtailmentBadge.textContent = '🌙 Low Sun / Standby';
+      elCurtailmentBadge.className = 'badge curtailment-badge night';
+      elCurtailmentTag.textContent = 'STANDBY (LOW SUN)';
+      elCurtailmentTag.style.color = '#94a3b8';
+      elActualHarvestVal.textContent = `${pvWatts} W`;
+      elSunPotentialVal.textContent = `0 W`;
+      elCurtailmentBarFill.style.width = '0%';
+      elCurtailmentBarFill.style.background = '#64748b';
     }
   }
 
@@ -795,6 +887,15 @@
       if (t.power_generation_total_kwh && elLifetimeKwh) {
         elLifetimeKwh.textContent = `${t.power_generation_total_kwh.toLocaleString()} kWh`;
       }
+
+      // Update Solar Potential & Curtailment Analytics
+      lastTelemetry = t;
+      updateSolarPotentialAndCurtailment(
+        t.pv_voltage_v,
+        t.pv_power_w,
+        t.battery_soc_percent,
+        t.max_charging_power_today_w
+      );
 
       // Update System Hardware
       if (elCtrlTemp) elCtrlTemp.textContent = `${t.controller_temp_c || 0}°C`;

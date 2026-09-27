@@ -83,8 +83,9 @@
       <section class="card solar-card">
         <div class="card-header">
           <div class="card-icon solar-icon">⚡</div>
-          <h2>PANEL VOLTAGE SPEEDOMETER</h2>
+          <h2>PANEL SPEEDOMETER</h2>
           <span class="badge mppt-badge" id="chargingStateBadge">MPPT Active</span>
+          <span class="badge curtailment-badge throttled" id="curtailmentBadge">☀️ Full Sun • Throttled</span>
         </div>
 
         <div class="gauge-wrapper speedometer-wrapper">
@@ -92,6 +93,24 @@
           <div class="speedometer-center-readout">
             <div class="speedo-speed" id="speedoVoltsVal">36.1<span class="unit">V</span></div>
             <div class="speedo-label">VOLTS DC</div>
+          </div>
+        </div>
+
+        <!-- Solar Generation vs Sun Potential Banner -->
+        <div class="potential-banner" id="potentialBanner">
+          <div class="potential-col">
+            <span class="potential-sublabel">ACTUAL HARVEST</span>
+            <span class="potential-val" id="actualHarvestVal">21 W</span>
+          </div>
+          <div class="curtailment-indicator" id="curtailmentIndicator">
+            <span class="curtailment-tag" id="curtailmentTag">93% THROTTLED (BATTERY FULL)</span>
+            <div class="curtailment-bar-bg">
+              <div class="curtailment-bar-fill" id="curtailmentBarFill" style="width: 7%;"></div>
+            </div>
+          </div>
+          <div class="potential-col text-right">
+            <span class="potential-sublabel">SUN POTENTIAL</span>
+            <span class="potential-val highlight-gold" id="sunPotentialVal">~300 W</span>
           </div>
         </div>
 
