@@ -148,22 +148,29 @@ Function code `0x03` (Read Holding Registers). Checksum is Modbus CRC-16 (Low By
 [DeviceID] [Function] [Start Register High] [Start Register Low] [Num Registers High] [Num Registers Low] [CRC Low] [CRC High]
 ```
 
+- **Query System Ratings (Reg 10, 1 word)**:
+  `FF 03 00 0A 00 01 A1 D7`
 - **Query Device Info (Reg 12, 8 words)**:
   `FF 03 00 0C 00 08 90 14`
-- **Query Live Real-Time Telemetry (Reg 256, 34 words)**:
-  `FF 03 01 00 00 22 D1 F1`
+- **Query Live Real-Time Telemetry (Reg 256, 35 words)**:
+  `FF 03 01 00 00 23 10 31`
 - **Query Battery Chemistry Profile (Reg 57348, 1 word)**:
   `FF 03 E0 04 00 01 C8 08`
 
 ### 4.3 Notification Chunk Reassembly
-Because BLE default MTU is ~23 bytes (20 payload bytes), a 73-byte Modbus response arrives across 4 chunks:
+Because BLE default MTU is ~23 bytes (20 payload bytes), a 75-byte Modbus response arrives across 4 chunks:
 ```
-Chunk 1: 20 bytes -> [FF 03 44 [data 0..16]]
+Chunk 1: 20 bytes -> [FF 03 46 [data 0..16]]
 Chunk 2: 20 bytes -> [[data 17..36]]
 Chunk 3: 20 bytes -> [[data 37..56]]
-Chunk 4: 13 bytes -> [[data 57..67] [CRC_Lo] [CRC_Hi]]
+Chunk 4: 15 bytes -> [[data 57..69] [CRC_Lo] [CRC_Hi]]
 ```
-The client buffers incoming bytes until `len(buffer) == byte_count + 5`, then validates CRC-16 before parsing.
+The client buffers incoming bytes until `len(buffer) == byte_count + 5`, then validates CRC-16 before parsing. Exception responses (`func_code & 0x80 != 0`) are handled at a fixed 5-byte length.
+
+### 4.4 Hardware Timing & Pacing (Renogy SWE Runbook)
+- **UART Baud & Physical Layer**: Internal MCU UART operates at 9600-8N1 (~1.04 ms/byte). A 75-byte response requires ~78ms of physical UART wire transmission time plus 20-50ms MCU ADC conversion latency.
+- **Inter-Frame Silence ($t_{3.5}$ Rule)**: Modbus RTU requires at least 3.5 character times of bus silence between frames. To prevent controller MCU UART RX overrun, Renology enforces a mandatory 100ms hardware pacing delay between consecutive Modbus frames.
+- **One-Time Startup Ingestion**: Static hardware parameters (rated system voltage/current, model name, battery profile) are queried once upon link establishment and cached, eliminating serial bus contention during the 5s telemetry loop.
 
 ---
 

@@ -89,7 +89,8 @@ func (s *Storage) Save(t *models.Telemetry) error {
 		writer := csv.NewWriter(csvFile)
 		if !s.csvHeaderSet {
 			_ = writer.Write([]string{
-				"timestamp", "device_name", "mac_address", "model",
+				"timestamp", "device_name", "mac_address", "model", "battery_type",
+				"rated_voltage_v", "rated_current_a",
 				"battery_soc", "battery_v", "battery_a", "battery_w",
 				"controller_temp_c", "battery_temp_c", "charging_status",
 				"pv_v", "pv_a", "pv_w",
@@ -103,6 +104,9 @@ func (s *Storage) Save(t *models.Telemetry) error {
 			t.DeviceName,
 			t.MACAddress,
 			t.Model,
+			t.BatteryType,
+			fmt.Sprintf("%d", t.RatedVoltageVolts),
+			fmt.Sprintf("%d", t.RatedCurrentAmps),
 			fmt.Sprintf("%d", t.BatterySOC),
 			fmt.Sprintf("%.2f", t.BatteryVoltage),
 			fmt.Sprintf("%.2f", t.BatteryCurrent),

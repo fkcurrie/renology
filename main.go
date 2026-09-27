@@ -112,6 +112,8 @@ func runSimulator(ctx context.Context, interval time.Duration, store *storage.St
 			DeviceID:                0xFF,
 			DeviceType:              "Solar Charge Controller",
 			RSSI:                    -72,
+			RatedVoltageVolts:       12,
+			RatedCurrentAmps:        40,
 			BatterySOC:              98,
 			BatteryVoltage:          vBatt,
 			BatteryCurrent:          aBatt,

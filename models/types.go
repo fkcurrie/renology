@@ -42,6 +42,8 @@ type Telemetry struct {
 	BatteryTemperatureC     int       `json:"battery_temp_c"`          // °C
 	ChargingStatus          string    `json:"charging_status"`         // e.g. "MPPT", "Floating", etc.
 	BatteryType             string    `json:"battery_type,omitempty"`  // e.g. "Lithium (LFP)"
+	RatedVoltageVolts       int       `json:"rated_voltage_v,omitempty"`
+	RatedCurrentAmps        int       `json:"rated_current_a,omitempty"`
 
 	// Solar PV metrics
 	PVVoltage               float64   `json:"pv_voltage_v"`            // Volts

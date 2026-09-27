@@ -36,17 +36,22 @@ type Client struct {
 	config  ClientConfig
 	adapter *bluetooth.Adapter
 
-	mu           sync.Mutex
-	device       *bluetooth.Device
-	writeChar    *bluetooth.DeviceCharacteristic
-	notifyChar   *bluetooth.DeviceCharacteristic
-	cachedModel  string
-	latestTelem  *models.Telemetry
-	respChan     chan []byte
-	chunkBuffer  []byte
-	expectedLen  int
-	isConnected  bool
+	mu                sync.Mutex
+	device            *bluetooth.Device
+	writeChar         *bluetooth.DeviceCharacteristic
+	notifyChar        *bluetooth.DeviceCharacteristic
+	cachedModel       string
+	cachedRatedVolt   int
+	cachedRatedAmp    int
+	cachedBatteryType string
+	latestTelem       *models.Telemetry
+	respChan          chan []byte
+	chunkBuffer       []byte
+	expectedLen       int
+	isConnected       bool
 }
+
+const interFrameDelay = 100 * time.Millisecond
 
 // NewClient initializes a new Renogy client.
 func NewClient(cfg ClientConfig) *Client {
@@ -252,10 +257,21 @@ func (c *Client) handleIncomingChunk(chunk []byte) {
 
 	c.chunkBuffer = append(c.chunkBuffer, chunk...)
 
+	// Scan buffer for DeviceID preamble to discard any framing garbage or noise
+	for len(c.chunkBuffer) > 0 && c.chunkBuffer[0] != c.config.DeviceID {
+		c.chunkBuffer = c.chunkBuffer[1:]
+	}
+
 	if len(c.chunkBuffer) >= 3 && c.expectedLen == 0 {
-		// Modbus RTU Response: [DeviceID, FuncCode, ByteCount, Data..., CRCLo, CRCHi]
-		byteCount := int(c.chunkBuffer[2])
-		c.expectedLen = byteCount + 5
+		funcCode := c.chunkBuffer[1]
+		if (funcCode & 0x80) != 0 {
+			// Modbus Exception Response: [DeviceID, FuncCode|0x80, ExceptionCode, CRCLo, CRCHi] (5 bytes)
+			c.expectedLen = 5
+		} else {
+			// Normal Modbus RTU Response: [DeviceID, FuncCode, ByteCount, Data..., CRCLo, CRCHi]
+			byteCount := int(c.chunkBuffer[2])
+			c.expectedLen = byteCount + 5
+		}
 	}
 
 	if c.expectedLen > 0 && len(c.chunkBuffer) >= c.expectedLen {
@@ -274,6 +290,9 @@ func (c *Client) handleIncomingChunk(chunk []byte) {
 
 // sendModbusQuery sends a Modbus read request and waits for the reassembled response.
 func (c *Client) sendModbusQuery(ctx context.Context, startReg, numRegs uint16, timeout time.Duration) ([]byte, error) {
+	// Respect hardware inter-frame pacing gap (t3.5 silence) before sending
+	time.Sleep(interFrameDelay)
+
 	req := modbus.BuildReadRequest(c.config.DeviceID, startReg, numRegs)
 
 	// Flush any stale responses
@@ -345,25 +364,47 @@ func (c *Client) pollOnce(ctx context.Context, deviceName, mac string, rssi int)
 		RSSI:       rssi,
 	}
 
-	// 1. Query Device Info / Model if not cached (Register 12, 8 words)
+	// 1. One-time hardware detection: ratings, model, and battery chemistry
 	if c.cachedModel == "" {
-		resp, err := c.sendModbusQuery(ctx, 12, 8, 2*time.Second)
-		if err == nil {
-			model, err := ParseDeviceInfo(resp)
-			if err == nil && model != "" {
+		// Register 10 (0x000A): System Ratings (1 word)
+		if resp, err := c.sendModbusQuery(ctx, 10, 1, 2*time.Second); err == nil {
+			if v, a, err := ParseSystemRatings(resp); err == nil {
+				c.cachedRatedVolt = v
+				c.cachedRatedAmp = a
+				log.Printf("[Renogy] Hardware Ratings: %dV system, %dA rated charging current", v, a)
+			}
+		}
+
+		// Register 12 (0x000C): Product Model (8 words)
+		if resp, err := c.sendModbusQuery(ctx, 12, 8, 2*time.Second); err == nil {
+			if model, err := ParseDeviceInfo(resp); err == nil && model != "" {
 				c.cachedModel = model
 				log.Printf("[Renogy] Device Model: %s", model)
 			}
-		} else if c.config.Verbose {
-			log.Printf("[Renogy] Model query skipped: %v", err)
+		}
+
+		// Register 57348 (0xE004): Battery Profile (1 word)
+		if resp, err := c.sendModbusQuery(ctx, 57348, 1, 2*time.Second); err == nil {
+			var tmp models.Telemetry
+			if err := ParseBatteryType(resp, &tmp); err == nil && tmp.BatteryType != "" {
+				c.cachedBatteryType = tmp.BatteryType
+				log.Printf("[Renogy] Battery Chemistry Profile: %s", tmp.BatteryType)
+			}
 		}
 	}
 	telem.Model = c.cachedModel
+	telem.RatedVoltageVolts = c.cachedRatedVolt
+	telem.RatedCurrentAmps = c.cachedRatedAmp
+	telem.BatteryType = c.cachedBatteryType
 
-	// 2. Query Live Controller Telemetry (Register 256, 34 words)
-	resp, err := c.sendModbusQuery(ctx, 256, 34, 3*time.Second)
+	// 2. Query Live Controller Telemetry (Register 256, 35 words = 70 bytes data, 75 bytes frame)
+	resp, err := c.sendModbusQuery(ctx, 256, 35, 3*time.Second)
 	if err != nil {
-		return fmt.Errorf("failed to read operational data: %w", err)
+		// Fallback to 34 words if older controller firmware rejects 35 words
+		resp, err = c.sendModbusQuery(ctx, 256, 34, 3*time.Second)
+		if err != nil {
+			return fmt.Errorf("failed to read operational data: %w", err)
+		}
 	}
 
 	if err := ParseControllerTelemetry(resp, telem); err != nil {
@@ -388,9 +429,19 @@ func (c *Client) pollOnce(ctx context.Context, deviceName, mac string, rssi int)
 
 // printTelemetrySummary prints a concise, human-readable status line.
 func (c *Client) printTelemetrySummary(t *models.Telemetry) {
-	fmt.Printf("[%s] %s | Battery: %d%% %.1fV %.2fA (%.1fW) | Solar PV: %.1fV %.2fA (%dW) | State: %s | Today: %d Wh\n",
+	bType := ""
+	if t.BatteryType != "" {
+		bType = fmt.Sprintf(" [%s]", t.BatteryType)
+	}
+	ratings := ""
+	if t.RatedCurrentAmps > 0 {
+		ratings = fmt.Sprintf(" (%dA)", t.RatedCurrentAmps)
+	}
+	fmt.Printf("[%s] %s%s%s | Batt: %d%% %.1fV %.2fA (%.1fW) | PV: %.1fV %.2fA (%dW) | State: %s | Today: %d Wh\n",
 		t.Timestamp.Format("15:04:05"),
 		t.Model,
+		ratings,
+		bType,
 		t.BatterySOC,
 		t.BatteryVoltage,
 		t.BatteryCurrent,

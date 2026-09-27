@@ -31,7 +31,20 @@ func ParseDeviceInfo(payload []byte) (string, error) {
 	return model, nil
 }
 
-// ParseControllerTelemetry parses registers starting from 0x0100 (34 words = 68 bytes).
+// ParseSystemRatings parses register 0x000A (rated system voltage & charging current).
+func ParseSystemRatings(payload []byte) (int, int, error) {
+	if len(payload) < 7 {
+		return 0, 0, fmt.Errorf("payload too short for ratings: %d bytes", len(payload))
+	}
+	if payload[1] != 0x03 {
+		return 0, 0, fmt.Errorf("unexpected function code: 0x%02X", payload[1])
+	}
+	ratedVoltage := int(payload[3])
+	ratedCurrent := int(payload[4])
+	return ratedVoltage, ratedCurrent, nil
+}
+
+// ParseControllerTelemetry parses registers starting from 0x0100 (34 or 35 words).
 func ParseControllerTelemetry(payload []byte, t *models.Telemetry) error {
 	if len(payload) < 73 {
 		return fmt.Errorf("payload too short for controller telemetry: %d bytes (expected >= 73)", len(payload))
@@ -120,9 +133,14 @@ func ParseControllerTelemetry(payload []byte, t *models.Telemetry) error {
 		t.ChargingStatus = fmt.Sprintf("Unknown (0x%02X)", statusByte)
 	}
 
-	// Offset 69-72: Fault codes (uint32)
-	if len(payload) >= 73 {
+	// Fault codes: Register 0x0121 (Word 33) and 0x0122 (Word 34)
+	if len(payload) >= 75 {
+		// Full 35-word query: payload[69:73] contains registers 0x0121 and 0x0122 (4 bytes)
 		t.FaultCode = binary.BigEndian.Uint32(payload[69:73])
+		t.FaultDescriptions = DecodeFaultCode(t.FaultCode)
+	} else if len(payload) >= 73 {
+		// Legacy 34-word query: only low 16 bits in payload[69:71] (payload[71:73] is CRC!)
+		t.FaultCode = uint32(binary.BigEndian.Uint16(payload[69:71]))
 		t.FaultDescriptions = DecodeFaultCode(t.FaultCode)
 	}
 
