@@ -112,7 +112,7 @@ func (c *Client) Start(ctx context.Context) error {
 		err = c.connectAndSetup(scanResult.Address)
 		if err != nil {
 			if c.config.Storage != nil {
-				_ = c.config.Storage.RecordRFMeasurement(time.Now(), scanResult.Address.String(), scanResult.LocalName(), int(scanResult.RSSI), false, err.Error())
+				_ = c.config.Storage.RecordRFMeasurement(time.Now(), scanResult.Address.String(), strings.TrimSpace(scanResult.LocalName()), int(scanResult.RSSI), false, err.Error())
 			}
 			log.Printf("[Renogy] Connection failed (RSSI: %d dBm): %v. Retrying in %v...", scanResult.RSSI, err, backoff)
 			select {
@@ -125,8 +125,9 @@ func (c *Client) Start(ctx context.Context) error {
 		}
 
 		// Successfully connected!
+		deviceName := strings.TrimSpace(scanResult.LocalName())
 		if c.config.Storage != nil {
-			_ = c.config.Storage.RecordRFMeasurement(time.Now(), scanResult.Address.String(), scanResult.LocalName(), int(scanResult.RSSI), true, "")
+			_ = c.config.Storage.RecordRFMeasurement(time.Now(), scanResult.Address.String(), deviceName, int(scanResult.RSSI), true, "")
 		}
 		backoff = 2 * time.Second
 		log.Printf("*******************************************************************************")
@@ -134,7 +135,7 @@ func (c *Client) Start(ctx context.Context) error {
 		log.Printf("[Renogy] Starting 5-second Modbus telemetry polling loop...")
 		log.Printf("*******************************************************************************")
 
-		if err := c.pollLoop(ctx, scanResult.LocalName(), scanResult.Address.String(), int(scanResult.RSSI)); err != nil {
+		if err := c.pollLoop(ctx, deviceName, scanResult.Address.String(), int(scanResult.RSSI)); err != nil {
 			log.Printf("[Renogy] Polling ended: %v. Reconnecting...", err)
 			c.Disconnect()
 		}
@@ -209,20 +210,22 @@ func (c *Client) connectAndSetup(addr bluetooth.Address) error {
 
 		for _, ch := range chars {
 			cUUID := strings.ToLower(ch.UUID().String())
-			if strings.Contains(cUUID, "ffd1") || sUUID == UUIDServiceWrite {
+			// Write characteristic: must be 0000ffd1 under 0000ffd0
+			if sUUID == UUIDServiceWrite && (cUUID == UUIDCharWrite || strings.HasPrefix(cUUID, "0000ffd1")) {
 				chCopy := ch
 				c.writeChar = &chCopy
 				writeFound = true
 				if c.config.Verbose {
-					log.Printf("[Renogy] Found Write characteristic: %s", cUUID)
+					log.Printf("[Renogy] Found Write characteristic: %s in service %s", cUUID, sUUID)
 				}
 			}
-			if strings.Contains(cUUID, "fff1") || sUUID == UUIDServiceRead {
+			// Notify characteristic: must be 0000fff1 under 0000fff0
+			if sUUID == UUIDServiceRead && (cUUID == UUIDCharNotify || strings.HasPrefix(cUUID, "0000fff1")) {
 				chCopy := ch
 				c.notifyChar = &chCopy
 				notifyFound = true
 				if c.config.Verbose {
-					log.Printf("[Renogy] Found Notify characteristic: %s", cUUID)
+					log.Printf("[Renogy] Found Notify characteristic: %s in service %s", cUUID, sUUID)
 				}
 			}
 		}
@@ -253,6 +256,10 @@ func (c *Client) handleIncomingChunk(chunk []byte) {
 
 	if len(chunk) == 0 {
 		return
+	}
+
+	if c.config.Verbose {
+		log.Printf("[Renogy] RX Chunk (%d bytes): %X", len(chunk), chunk)
 	}
 
 	c.chunkBuffer = append(c.chunkBuffer, chunk...)

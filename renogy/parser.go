@@ -27,7 +27,7 @@ func ParseDeviceInfo(payload []byte) (string, error) {
 		return "", fmt.Errorf("incomplete payload: expected %d bytes, got %d", 3+byteCount, len(payload))
 	}
 	modelBytes := payload[3 : 3+byteCount]
-	model := strings.TrimRight(string(modelBytes), "\x00 ")
+	model := strings.TrimSpace(strings.Trim(string(modelBytes), "\x00"))
 	return model, nil
 }
 
