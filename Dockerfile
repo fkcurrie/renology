@@ -1,5 +1,5 @@
 # Multi-stage production Dockerfile for Renology Cloud Relay on Google Cloud Run
-FROM golang:1.24-alpine AS builder
+FROM golang:alpine AS builder
 
 # Install build dependencies for CGO (SQLite)
 RUN apk add --no-cache gcc musl-dev

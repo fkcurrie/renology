@@ -6,7 +6,7 @@ Wants=bluetooth.target
 [Service]
 Type=simple
 WorkingDirectory=/home/fcurrie/Projects/renology
-ExecStart=/home/fcurrie/Projects/renology/renology -mac 60:98:66:F9:84:D6 -interval 5 -out ./data -http :8080
+ExecStart=/home/fcurrie/Projects/renology/renology -mac 60:98:66:F9:84:D6 -interval 5 -out ./data -http :8080 -cloud-url https://renology-952659886764.us-central1.run.app -cloud-token P72dBqPoTIFRDxDrqlFYJdit
 Restart=always
 RestartSec=5
 Nice=10
