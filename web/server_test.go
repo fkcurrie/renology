@@ -149,4 +149,20 @@ func TestWebServerEndpoints(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &weatherMap); err != nil {
 		t.Fatalf("Failed to parse /api/weather JSON: %v", err)
 	}
+
+	// Test 8: GET /api/history/recent?minutes=60
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("GET", "/api/history/recent?minutes=60", nil)
+	server.httpServer.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected GET /api/history/recent 200 OK, got %d", rec.Code)
+	}
+	var recentResp models.RecentHistoryResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &recentResp); err != nil {
+		t.Fatalf("Failed to parse /api/history/recent JSON: %v", err)
+	}
+	if recentResp.TotalSamples != 1 {
+		t.Errorf("Expected 1 sample in recent history, got %d", recentResp.TotalSamples)
+	}
 }

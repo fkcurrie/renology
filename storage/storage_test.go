@@ -120,3 +120,60 @@ func TestLegacyCSVMigration(t *testing.T) {
 		t.Errorf("Expected 2 records migrated into SQLite, got %d", count)
 	}
 }
+
+func TestGetRecentTelemetry(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "renology_recent_test_*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	s, err := NewStorage(tempDir)
+	if err != nil {
+		t.Fatalf("NewStorage failed: %v", err)
+	}
+	defer s.Close()
+
+	now := time.Now()
+	// Insert 10 samples across the last 30 minutes
+	for i := 0; i < 10; i++ {
+		sampleTime := now.Add(-time.Duration(25-i*2) * time.Minute)
+		telem := &models.Telemetry{
+			Timestamp:              sampleTime,
+			DeviceName:             "BT-TH-66F984D6",
+			MACAddress:             "60:98:66:F9:84:D6",
+			Model:                  "RNG-CTRL-RVR20",
+			BatterySOC:             100,
+			BatteryVoltage:         13.35,
+			BatteryCurrent:         0.0,
+			PVVoltage:              35.0,
+			PVPower:                0,
+			ChargingStatus:         "MPPT",
+			PowerGenerationTodayWh: 95,
+		}
+		if err := s.Save(telem); err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+	}
+
+	recent, raw, err := s.GetRecentTelemetry(60, now)
+	if err != nil {
+		t.Fatalf("GetRecentTelemetry failed: %v", err)
+	}
+	if recent.TotalSamples != 10 {
+		t.Errorf("Expected 10 total samples, got %d", recent.TotalSamples)
+	}
+	if len(raw) != 10 {
+		t.Errorf("Expected 10 raw records, got %d", len(raw))
+	}
+	if recent.BatterySOC != 100 {
+		t.Errorf("Expected BatterySOC 100, got %d", recent.BatterySOC)
+	}
+	if recent.AvgPVVoltage < 34.0 || recent.AvgPVVoltage > 36.0 {
+		t.Errorf("Expected AvgPVVoltage ~35.0, got %f", recent.AvgPVVoltage)
+	}
+	if len(recent.MinutePoints) == 0 {
+		t.Errorf("Expected non-empty MinutePoints")
+	}
+}
+

@@ -31,6 +31,8 @@ func main() {
 	webOnly := flag.Bool("web-only", false, "Run only the kiosk web server without polling BLE")
 	simulate := flag.Bool("simulate", false, "Run in simulation mode for testing / offline verification")
 	showStatus := flag.Bool("status", false, "Print summary of RF survey and latest telemetry status")
+	recentMin := flag.Int("recent", 0, "Print telemetry summary and time-series table for the last N minutes (e.g. -recent 60)")
+	rawOutput := flag.Bool("raw", false, "When using -recent, print individual raw samples instead of minute aggregates")
 	verbose := flag.Bool("verbose", false, "Enable verbose packet-level debug output")
 	flag.Parse()
 
@@ -41,6 +43,11 @@ func main() {
 
 	if *showStatus {
 		printStatusReport(absOutDir)
+		return
+	}
+
+	if *recentMin > 0 {
+		printRecentReport(absOutDir, *recentMin, *rawOutput)
 		return
 	}
 
@@ -318,3 +325,72 @@ func printStatusReport(dataDir string) {
 	}
 	fmt.Println("=====================================================")
 }
+
+// printRecentReport outputs an executive summary and time-series table for the last N minutes.
+func printRecentReport(dataDir string, minutes int, raw bool) {
+	store, err := storage.NewStorage(dataDir)
+	if err != nil {
+		log.Fatalf("Failed to open storage: %v", err)
+	}
+	defer store.Close()
+
+	summary, rawRecords, err := store.GetRecentTelemetry(minutes, time.Now())
+	if err != nil {
+		log.Fatalf("Failed to query recent telemetry: %v", err)
+	}
+
+	fmt.Println("========================================================================================================")
+	fmt.Printf("  RENOLOGY SOLAR TELEMETRY REPORT — LAST %d MINUTES\n", minutes)
+	fmt.Printf("  Window:            %s to %s\n", summary.StartTime.Local().Format("15:04:05"), summary.EndTime.Local().Format("15:04:05"))
+	fmt.Println("========================================================================================================")
+	fmt.Printf("  Samples Recorded:  %d samples (~1 sample every 5s)\n", summary.TotalSamples)
+	fmt.Printf("  Battery Tank:      %d%% Full (Avg %.2fV) • Lithium LFP\n", summary.BatterySOC, summary.AvgBatteryV)
+	fmt.Printf("  Solar Sun Voltage: Avg %.1fV (Min %.1fV, Max %.1fV)\n", summary.AvgPVVoltage, summary.MinPVVoltage, summary.MaxPVVoltage)
+	fmt.Printf("  Solar Power:       Avg %.1fW (Peak %dW)\n", summary.AvgSolarWatts, summary.PeakSolarWatts)
+	fmt.Printf("  Today's Yield:     %d Wh (cumulative)\n", summary.TodayYieldWh)
+	fmt.Printf("  Status Narrative:  %s\n", summary.StatusSummary)
+	fmt.Println("--------------------------------------------------------------------------------------------------------")
+
+	if len(summary.MinutePoints) == 0 && len(rawRecords) == 0 {
+		fmt.Println("  No telemetry data found for this time window.")
+		fmt.Println("========================================================================================================")
+		return
+	}
+
+	if raw {
+		fmt.Printf(" %-8s | %-10s | %-10s | %-8s | %-10s | %-10s | %-8s | %s\n",
+			"TIME", "PV VOLTS", "PV POWER", "BATT SOC", "BATT VOLTS", "BATT AMPS", "TODAY WH", "STATUS")
+		fmt.Println("--------------------------------------------------------------------------------------------------------")
+		for _, r := range rawRecords {
+			fmt.Printf(" %-8s | %8.1fV | %8dW | %7d%% | %8.2fV | %+8.2fA | %6dWh | %s\n",
+				r.Timestamp.Local().Format("15:04:05"),
+				r.PVVoltage,
+				r.PVPower,
+				r.BatterySOC,
+				r.BatteryVoltage,
+				r.BatteryCurrent,
+				r.PowerGenerationTodayWh,
+				r.ChargingStatus,
+			)
+		}
+	} else {
+		fmt.Printf(" %-6s | %-10s | %-14s | %-8s | %-10s | %-10s | %-8s | %s\n",
+			"TIME", "SUN VOLTS", "SOLAR POWER", "BATT SOC", "BATT VOLTS", "NET AMPS", "TODAY WH", "SYSTEM MODE / STORY")
+		fmt.Println("--------------------------------------------------------------------------------------------------------")
+		for _, p := range summary.MinutePoints {
+			powerStr := fmt.Sprintf("%dW (Pk %dW)", p.SolarPowerW, p.PeakSolarW)
+			fmt.Printf(" %-6s | %8.1fV | %-14s | %7d%% | %8.2fV | %+8.2fA | %6dWh | %s\n",
+				p.TimeLabel,
+				p.PVVoltage,
+				powerStr,
+				p.BatterySOC,
+				p.BatteryVoltage,
+				p.BatteryCurrent,
+				p.TodayYieldWh,
+				p.Mode,
+			)
+		}
+	}
+	fmt.Println("========================================================================================================")
+}
+

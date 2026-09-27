@@ -27,3 +27,36 @@ type HistoryResponse struct {
 	Points24h []HistoryPoint24h `json:"points_24h"`
 	Days7d    []DailySummary7d  `json:"days_7d"`
 }
+
+// RecentMinutePoint represents an aggregated 1-minute point in a recent telemetry report.
+type RecentMinutePoint struct {
+	Timestamp      time.Time `json:"timestamp"`
+	TimeLabel      string    `json:"time_label"`        // e.g. "11:45"
+	PVVoltage      float64   `json:"pv_voltage_v"`      // Average Solar Panel Voltage
+	SolarPowerW    int       `json:"solar_power_w"`     // Average Solar Power (Watts)
+	PeakSolarW     int       `json:"peak_solar_w"`      // Peak Solar Power in minute
+	BatterySOC     int       `json:"battery_soc"`       // Battery SOC %
+	BatteryVoltage float64   `json:"battery_voltage_v"`  // Battery Voltage
+	BatteryCurrent float64   `json:"battery_current_a"`  // Net Battery Current
+	TodayYieldWh   int       `json:"today_yield_wh"`    // Today's cumulative generation
+	Mode           string    `json:"mode"`              // e.g. "Float / Standby", "Active MPPT"
+}
+
+// RecentHistoryResponse represents telemetry data and aggregates for a recent time window (e.g. last 60 minutes).
+type RecentHistoryResponse struct {
+	WindowMinutes  int                 `json:"window_minutes"`
+	StartTime      time.Time           `json:"start_time"`
+	EndTime        time.Time           `json:"end_time"`
+	TotalSamples   int                 `json:"total_samples"`
+	BatterySOC     int                 `json:"battery_soc"`
+	AvgBatteryV    float64             `json:"avg_battery_v"`
+	AvgPVVoltage   float64             `json:"avg_pv_v"`
+	MinPVVoltage   float64             `json:"min_pv_v"`
+	MaxPVVoltage   float64             `json:"max_pv_v"`
+	AvgSolarWatts  float64             `json:"avg_solar_w"`
+	PeakSolarWatts int                 `json:"peak_solar_w"`
+	TodayYieldWh   int                 `json:"today_yield_wh"`
+	StatusSummary  string              `json:"status_summary"`
+	MinutePoints   []RecentMinutePoint `json:"minute_points"`
+}
+

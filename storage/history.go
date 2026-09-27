@@ -3,6 +3,7 @@ package storage
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"math"
 	"os"
 	"time"
@@ -281,4 +282,194 @@ func simulateDayYield(weekday time.Weekday) (wh int, peakW int) {
 		return val[0], val[1]
 	}
 	return 450, 190
+}
+
+// GetRecentTelemetry retrieves recent telemetry records and computes a minute-by-minute downsampled summary.
+func (s *Storage) GetRecentTelemetry(minutes int, referenceTime time.Time) (*models.RecentHistoryResponse, []models.Telemetry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if minutes <= 0 {
+		minutes = 60
+	}
+	if referenceTime.IsZero() {
+		referenceTime = time.Now()
+	}
+
+	startWindow := referenceTime.Add(-time.Duration(minutes) * time.Minute)
+	endWindow := referenceTime.Add(1 * time.Minute)
+
+	var records []models.Telemetry
+	if s.db != nil {
+		if sqlRecords, err := s.queryTelemetryRange(startWindow, endWindow); err == nil && len(sqlRecords) > 0 {
+			records = sqlRecords
+		}
+	}
+
+	if len(records) == 0 {
+		all := s.readAllTelemetryRecords()
+		for _, r := range all {
+			if !r.Timestamp.Before(startWindow) && !r.Timestamp.After(endWindow) {
+				records = append(records, r)
+			}
+		}
+	}
+
+	resp := &models.RecentHistoryResponse{
+		WindowMinutes: minutes,
+		StartTime:     startWindow,
+		EndTime:       referenceTime,
+		TotalSamples:  len(records),
+		MinutePoints:  make([]models.RecentMinutePoint, 0),
+	}
+
+	if len(records) == 0 {
+		resp.StatusSummary = "No telemetry samples recorded in the specified time window."
+		return resp, nil, nil
+	}
+
+	// Calculate overall statistics and group by minute
+	type minuteBucket struct {
+		ts      time.Time
+		pvVolts []float64
+		pvWatts []int
+		battSoc []int
+		battV   []float64
+		battA   []float64
+		todayWh int
+		status  string
+	}
+
+	minuteMap := make(map[string]*minuteBucket)
+	var orderedKeys []string
+
+	var sumBattV float64
+	var sumPVV float64
+	var sumWatts float64
+	minPV := 999.0
+	maxPV := 0.0
+	peakW := 0
+	lastSOC := 0
+	lastWh := 0
+
+	for _, r := range records {
+		sumBattV += r.BatteryVoltage
+		sumPVV += r.PVVoltage
+		sumWatts += float64(r.PVPower)
+		if r.PVVoltage < minPV {
+			minPV = r.PVVoltage
+		}
+		if r.PVVoltage > maxPV {
+			maxPV = r.PVVoltage
+		}
+		if r.PVPower > peakW {
+			peakW = r.PVPower
+		}
+		lastSOC = r.BatterySOC
+		if r.PowerGenerationTodayWh > lastWh {
+			lastWh = r.PowerGenerationTodayWh
+		}
+
+		key := r.Timestamp.Local().Format("15:04")
+		bucket, exists := minuteMap[key]
+		if !exists {
+			bucket = &minuteBucket{
+				ts: r.Timestamp.Local(),
+			}
+			minuteMap[key] = bucket
+			orderedKeys = append(orderedKeys, key)
+		}
+		bucket.pvVolts = append(bucket.pvVolts, r.PVVoltage)
+		bucket.pvWatts = append(bucket.pvWatts, r.PVPower)
+		bucket.battSoc = append(bucket.battSoc, r.BatterySOC)
+		bucket.battV = append(bucket.battV, r.BatteryVoltage)
+		bucket.battA = append(bucket.battA, r.BatteryCurrent)
+		if r.PowerGenerationTodayWh > bucket.todayWh {
+			bucket.todayWh = r.PowerGenerationTodayWh
+		}
+		bucket.status = r.ChargingStatus
+	}
+
+	n := float64(len(records))
+	resp.BatterySOC = lastSOC
+	resp.AvgBatteryV = math.Round((sumBattV/n)*100) / 100
+	resp.AvgPVVoltage = math.Round((sumPVV/n)*10) / 10
+	resp.MinPVVoltage = math.Round(minPV*10) / 10
+	resp.MaxPVVoltage = math.Round(maxPV*10) / 10
+	resp.AvgSolarWatts = math.Round((sumWatts/n)*10) / 10
+	resp.PeakSolarWatts = peakW
+	resp.TodayYieldWh = lastWh
+
+	// Build minute points
+	for _, k := range orderedKeys {
+		b := minuteMap[k]
+		var avgPV, avgW, avgV, avgA float64
+		var avgSOC int
+		peakMinuteW := 0
+
+		for _, v := range b.pvVolts {
+			avgPV += v
+		}
+		avgPV /= float64(len(b.pvVolts))
+
+		for _, w := range b.pvWatts {
+			avgW += float64(w)
+			if w > peakMinuteW {
+				peakMinuteW = w
+			}
+		}
+		avgW /= float64(len(b.pvWatts))
+
+		for _, s := range b.battSoc {
+			avgSOC += s
+		}
+		avgSOC /= len(b.battSoc)
+
+		for _, v := range b.battV {
+			avgV += v
+		}
+		avgV /= float64(len(b.battV))
+
+		for _, a := range b.battA {
+			avgA += a
+		}
+		avgA /= float64(len(b.battA))
+
+		mode := "Standby / Rest"
+		if avgSOC >= 95 && avgPV >= 28 && avgW < 50 {
+			mode = "Float / Standby"
+		} else if avgW >= 50 {
+			mode = "Active MPPT"
+		} else if avgPV < 15 {
+			mode = "Night / Resting"
+		} else {
+			mode = "Trickle / Standby"
+		}
+
+		resp.MinutePoints = append(resp.MinutePoints, models.RecentMinutePoint{
+			Timestamp:      b.ts,
+			TimeLabel:      k,
+			PVVoltage:      math.Round(avgPV*10) / 10,
+			SolarPowerW:    int(math.Round(avgW)),
+			PeakSolarW:     peakMinuteW,
+			BatterySOC:     avgSOC,
+			BatteryVoltage: math.Round(avgV*100) / 100,
+			BatteryCurrent: math.Round(avgA*100) / 100,
+			TodayYieldWh:   b.todayWh,
+			Mode:           mode,
+		})
+	}
+
+	// High level status summary
+	if resp.BatterySOC >= 95 && resp.AvgSolarWatts < 50 && resp.AvgPVVoltage >= 28 {
+		resp.StatusSummary = "System is in Float / Smart Curtailment. Battery tank is full (100%), resting on solar standby under direct sunshine."
+	} else if resp.AvgSolarWatts >= 50 {
+		resp.StatusSummary = fmt.Sprintf("Actively harvesting solar power. Generating an average of %.1fW (Peak %dW).", resp.AvgSolarWatts, resp.PeakSolarWatts)
+	} else if resp.AvgPVVoltage < 15 {
+		resp.StatusSummary = "Low sun / nocturnal conditions. Panels are dormant and running on battery storage."
+	} else {
+		resp.StatusSummary = "Normal operations under diffuse daylight."
+	}
+
+	return resp, records, nil
 }

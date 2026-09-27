@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -47,6 +48,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	// 1. API Endpoints
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/history", s.handleHistory)
+	mux.HandleFunc("/api/history/recent", s.handleRecentHistory)
 	mux.HandleFunc("/api/weather", s.handleWeather)
 	mux.HandleFunc("/api/health", s.handleHealth)
 
@@ -142,6 +144,33 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_ = json.NewEncoder(w).Encode(history)
+}
+
+// handleRecentHistory returns telemetry aggregates and minute points for the last N minutes.
+func (s *Server) handleRecentHistory(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	if s.config.Storage == nil {
+		http.Error(w, `{"error":"storage not initialized"}`, http.StatusInternalServerError)
+		return
+	}
+
+	minutes := 60
+	if mStr := r.URL.Query().Get("minutes"); mStr != "" {
+		if m, err := strconv.Atoi(mStr); err == nil && m > 0 {
+			minutes = m
+		}
+	}
+
+	summary, _, err := s.config.Storage.GetRecentTelemetry(minutes, time.Now())
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"failed to query recent history: %s"}`, err), http.StatusInternalServerError)
+		return
+	}
+
+	_ = json.NewEncoder(w).Encode(summary)
 }
 
 // handleHealth returns a basic health status check.
