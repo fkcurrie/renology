@@ -97,8 +97,12 @@ func (c *Client) Start(ctx context.Context) error {
 		log.Printf("[Renogy] Found device: %s [%s] (RSSI: %d dBm)",
 			scanResult.LocalName(), scanResult.Address.String(), scanResult.RSSI)
 
-		// Wait briefly after scanning to let radio settle
-		time.Sleep(500 * time.Millisecond)
+		if scanResult.RSSI < -95 {
+			log.Printf("[Renogy] Note: Signal (%d dBm) is near or below CC2541 hardware receiver threshold (-94 dBm). If connection aborts, bring receiver closer or verify phone app is closed.", scanResult.RSSI)
+		}
+
+		// Wait briefly after scanning to let BlueZ and radio settle
+		time.Sleep(400 * time.Millisecond)
 
 		err = c.connectAndSetup(scanResult.Address)
 		if err != nil {
@@ -159,7 +163,17 @@ func (c *Client) connectAndSetup(addr bluetooth.Address) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	device, err := c.adapter.Connect(addr, bluetooth.ConnectionParams{})
+	var device bluetooth.Device
+	var err error
+	for attempt := 1; attempt <= 2; attempt++ {
+		device, err = c.adapter.Connect(addr, bluetooth.ConnectionParams{})
+		if err == nil {
+			break
+		}
+		if attempt < 2 {
+			time.Sleep(600 * time.Millisecond)
+		}
+	}
 	if err != nil {
 		return fmt.Errorf("connect: %w", err)
 	}
