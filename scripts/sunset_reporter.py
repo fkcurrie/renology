@@ -254,122 +254,160 @@ Host:   Linux Mint / Surface Go 2 Solar Kiosk
 Renology Autonomous Monitoring System • Generated at {datetime.datetime.now().strftime('%H:%M:%S')}
 """
 
-    # Executive HTML Email Version
+    # Executive HTML Email Version (Universal High-Contrast Inline Styling)
     html_body = f"""<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
-<style>
-  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #0b111e; color: #f1f5f9; margin: 0; padding: 24px; }}
-  .container {{ max-width: 650px; margin: 0 auto; background: #131d31; border: 1px solid #1e293b; border-radius: 14px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }}
-  .header {{ background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); padding: 24px 28px; border-bottom: 1px solid #334155; }}
-  .header h1 {{ margin: 0 0 6px 0; font-size: 20px; color: #f59e0b; display: flex; align-items: center; letter-spacing: 0.5px; }}
-  .header .meta {{ font-size: 13px; color: #94a3b8; }}
-  .content {{ padding: 24px 28px; }}
-  .card {{ background: #0f172a; border: 1px solid #1e293b; border-radius: 10px; padding: 18px; margin-bottom: 20px; }}
-  .card-title {{ font-size: 14px; text-transform: uppercase; font-weight: 700; color: #38bdf8; margin: 0 0 14px 0; letter-spacing: 0.8px; display: flex; justify-content: space-between; }}
-  .grid {{ display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }}
-  .metric {{ background: #172238; border: 1px solid #22324f; border-radius: 8px; padding: 12px 14px; }}
-  .metric .label {{ font-size: 11px; text-transform: uppercase; color: #94a3b8; letter-spacing: 0.5px; margin-bottom: 4px; }}
-  .metric .value {{ font-size: 20px; font-weight: 700; color: #f8fafc; }}
-  .metric .value small {{ font-size: 12px; font-weight: 500; color: #cbd5e1; }}
-  .metric.highlight {{ border-left: 4px solid #f59e0b; }}
-  .metric.battery {{ border-left: 4px solid #10b981; }}
-  .metric.weather {{ border-left: 4px solid #38bdf8; }}
-  .footer {{ background: #0b111e; padding: 16px 28px; text-align: center; font-size: 12px; color: #64748b; border-top: 1px solid #1e293b; }}
-</style>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Renology Sunset Summary</title>
 </head>
-<body>
-<div class="container">
-  <div class="header">
-    <h1>☀️ Renology Sunset Solar & Weather Summary</h1>
-    <div class="meta">{date_str} • Sunset at <strong>{sunset_str}</strong> • Surface Go 2 Kiosk</div>
-  </div>
+<body style="margin: 0; padding: 24px 12px; background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-text-size-adjust: 100%; color: #1e293b;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color: #f1f5f9;">
+  <tr>
+    <td align="center">
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width: 640px; background-color: #ffffff; border: 1px solid #cbd5e1; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.06);">
 
-  <div class="content">
-    <!-- Section 1: Solar Energy Harvest -->
-    <div class="card">
-      <div class="card-title">
-        <span>⚡ Solar Power Generation</span>
-        <span style="color: #f59e0b;">{solar['controller_model']}</span>
-      </div>
-      <div class="grid">
-        <div class="metric highlight">
-          <div class="label">Total Generated Today</div>
-          <div class="value">{solar['energy_generated_wh']} <small>Wh</small> <span style="font-size: 13px; color: #94a3b8;">({solar['energy_generated_kwh']} kWh)</span></div>
-        </div>
-        <div class="metric highlight">
-          <div class="label">Peak Solar Power</div>
-          <div class="value">{solar['peak_power_w']} <small>W</small> <span style="font-size: 12px; color: #94a3b8;">@ {solar['peak_power_time']}</span></div>
-        </div>
-        <div class="metric">
-          <div class="label">Max Solar Array Voc</div>
-          <div class="value">{solar['max_pv_voltage_v']} <small>V</small></div>
-        </div>
-        <div class="metric">
-          <div class="label">Harvest Yield</div>
-          <div class="value">{solar['charging_ah_today']} <small>Ah</small></div>
-        </div>
-      </div>
-    </div>
+        <!-- Header -->
+        <tr>
+          <td style="background-color: #0f172a; padding: 22px 28px; color: #ffffff;">
+            <div style="font-size: 20px; font-weight: 700; color: #f59e0b; margin-bottom: 6px;">☀️ Renology Sunset Solar & Weather Summary</div>
+            <div style="font-size: 13px; color: #94a3b8; font-weight: 500;">{date_str} • Sunset at <strong>{sunset_str}</strong> • Surface Go 2 Appliance</div>
+          </td>
+        </tr>
 
-    <!-- Section 2: Battery Health & Storage -->
-    <div class="card">
-      <div class="card-title">
-        <span>🔋 Battery Storage ({solar['battery_type']})</span>
-        <span style="color: #10b981;">100% HEALTH</span>
-      </div>
-      <div class="grid">
-        <div class="metric battery">
-          <div class="label">Ending State of Charge</div>
-          <div class="value">{solar['ending_battery_soc']}% <small>SOC</small></div>
-        </div>
-        <div class="metric battery">
-          <div class="label">Ending Voltage</div>
-          <div class="value">{solar['ending_battery_v']} <small>V</small></div>
-        </div>
-        <div class="metric">
-          <div class="label">Voltage Range Today</div>
-          <div class="value">{solar['min_battery_v']}V <small>-</small> {solar['max_battery_v']}V</div>
-        </div>
-        <div class="metric">
-          <div class="label">Max Controller / Battery Temp</div>
-          <div class="value">{solar['max_controller_temp_c']}°C <small>/</small> {solar['max_battery_temp_c']}°C</div>
-        </div>
-      </div>
-    </div>
+        <!-- Content -->
+        <tr>
+          <td style="padding: 24px 28px;">
 
-    <!-- Section 3: Weather Station Observations -->
-    <div class="card" style="margin-bottom: 0;">
-      <div class="card-title">
-        <span>🌤️ Local Weather Station ({weather['station_model']})</span>
-        <span style="color: #38bdf8;">LIVE</span>
-      </div>
-      <div class="grid">
-        <div class="metric weather">
-          <div class="label">Outdoor Temperature</div>
-          <div class="value">{weather['outdoor_temp_c']}°C <small>({weather['outdoor_temp_f']}°F)</small></div>
-        </div>
-        <div class="metric weather">
-          <div class="label">Relative Humidity / Barometer</div>
-          <div class="value">{weather['humidity_pct']}% <small>/ {weather['pressure_hpa']} hPa</small></div>
-        </div>
-        <div class="metric">
-          <div class="label">Wind Speed & Peak Gust</div>
-          <div class="value">{weather['wind_kmh']} <small>km/h</small> <span style="font-size: 12px; color: #94a3b8;">(Gusts: {weather['wind_gust_kmh']} km/h)</span></div>
-        </div>
-        <div class="metric">
-          <div class="label">Solar Irradiance / UV Index</div>
-          <div class="value">{weather['solar_radiation_wm2']} <small>W/m²</small> <span style="font-size: 12px; color: #94a3b8;">(UV: {weather['uv_index']})</span></div>
-        </div>
-      </div>
-    </div>
-  </div>
+            <!-- Section 1: Solar Power Generation -->
+            <div style="margin-bottom: 24px; background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 18px 20px;">
+              <div style="font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: #d97706; margin-bottom: 14px;">
+                ⚡ Solar Power Generation &nbsp;•&nbsp; <span style="font-size: 13px; color: #64748b; font-weight: 600;">{solar['controller_model']}</span>
+              </div>
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                  <td width="50%" style="padding: 6px 8px 6px 0; vertical-align: top;">
+                    <div style="background-color: #ffffff; border: 1px solid #cbd5e1; border-left: 4px solid #f59e0b; border-radius: 8px; padding: 12px 14px;">
+                      <div style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 700; margin-bottom: 4px;">Total Generated Today</div>
+                      <div style="font-size: 20px; font-weight: 700; color: #0f172a;">{solar['energy_generated_wh']} <span style="font-size: 13px; font-weight: 500; color: #64748b;">Wh</span></div>
+                      <div style="font-size: 12px; color: #059669; font-weight: 600; margin-top: 2px;">{solar['energy_generated_kwh']} kWh</div>
+                    </div>
+                  </td>
+                  <td width="50%" style="padding: 6px 0 6px 8px; vertical-align: top;">
+                    <div style="background-color: #ffffff; border: 1px solid #cbd5e1; border-left: 4px solid #f59e0b; border-radius: 8px; padding: 12px 14px;">
+                      <div style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 700; margin-bottom: 4px;">Peak Solar Power</div>
+                      <div style="font-size: 20px; font-weight: 700; color: #0f172a;">{solar['peak_power_w']} <span style="font-size: 13px; font-weight: 500; color: #64748b;">W</span></div>
+                      <div style="font-size: 12px; color: #64748b; margin-top: 2px;">@ {solar['peak_power_time']}</div>
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td width="50%" style="padding: 6px 8px 6px 0; vertical-align: top;">
+                    <div style="background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 14px;">
+                      <div style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 700; margin-bottom: 4px;">Max Solar Array Voc</div>
+                      <div style="font-size: 18px; font-weight: 700; color: #0f172a;">{solar['max_pv_voltage_v']} <span style="font-size: 13px; font-weight: 500; color: #64748b;">V</span></div>
+                    </div>
+                  </td>
+                  <td width="50%" style="padding: 6px 0 6px 8px; vertical-align: top;">
+                    <div style="background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 14px;">
+                      <div style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 700; margin-bottom: 4px;">Harvest Yield</div>
+                      <div style="font-size: 18px; font-weight: 700; color: #0f172a;">{solar['charging_ah_today']} <span style="font-size: 13px; font-weight: 500; color: #64748b;">Ah</span></div>
+                    </div>
+                  </td>
+                </tr>
+              </table>
+            </div>
 
-  <div class="footer">
-    Renology Solar Monitoring Suite • Automated Sunset Dispatch to {DEFAULT_RECIPIENT}
-  </div>
-</div>
+            <!-- Section 2: Battery Storage -->
+            <div style="margin-bottom: 24px; background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 18px 20px;">
+              <div style="font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: #059669; margin-bottom: 14px;">
+                🔋 Battery Storage &nbsp;•&nbsp; <span style="font-size: 13px; color: #64748b; font-weight: 600;">{solar['battery_type']}</span>
+              </div>
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                  <td width="50%" style="padding: 6px 8px 6px 0; vertical-align: top;">
+                    <div style="background-color: #ffffff; border: 1px solid #cbd5e1; border-left: 4px solid #10b981; border-radius: 8px; padding: 12px 14px;">
+                      <div style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 700; margin-bottom: 4px;">Ending State of Charge</div>
+                      <div style="font-size: 20px; font-weight: 700; color: #059669;">{solar['ending_battery_soc']}% <span style="font-size: 13px; font-weight: 500; color: #64748b;">SOC</span></div>
+                    </div>
+                  </td>
+                  <td width="50%" style="padding: 6px 0 6px 8px; vertical-align: top;">
+                    <div style="background-color: #ffffff; border: 1px solid #cbd5e1; border-left: 4px solid #10b981; border-radius: 8px; padding: 12px 14px;">
+                      <div style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 700; margin-bottom: 4px;">Ending Voltage</div>
+                      <div style="font-size: 20px; font-weight: 700; color: #059669;">{solar['ending_battery_v']} <span style="font-size: 13px; font-weight: 500; color: #64748b;">V</span></div>
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td width="50%" style="padding: 6px 8px 6px 0; vertical-align: top;">
+                    <div style="background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 14px;">
+                      <div style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 700; margin-bottom: 4px;">Voltage Range Today</div>
+                      <div style="font-size: 16px; font-weight: 700; color: #0f172a;">{solar['min_battery_v']}V <span style="color: #94a3b8;">-</span> {solar['max_battery_v']}V</div>
+                    </div>
+                  </td>
+                  <td width="50%" style="padding: 6px 0 6px 8px; vertical-align: top;">
+                    <div style="background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 14px;">
+                      <div style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 700; margin-bottom: 4px;">Max Hardware Temp</div>
+                      <div style="font-size: 16px; font-weight: 700; color: #0f172a;">{solar['max_controller_temp_c']}°C <span style="color: #94a3b8;">/</span> {solar['max_battery_temp_c']}°C</div>
+                    </div>
+                  </td>
+                </tr>
+              </table>
+            </div>
+
+            <!-- Section 3: Weather Station Observations -->
+            <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 18px 20px;">
+              <div style="font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: #0284c7; margin-bottom: 14px;">
+                🌤️ Local Weather Station &nbsp;•&nbsp; <span style="font-size: 13px; color: #64748b; font-weight: 600;">{weather['station_model']}</span>
+              </div>
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                  <td width="50%" style="padding: 6px 8px 6px 0; vertical-align: top;">
+                    <div style="background-color: #ffffff; border: 1px solid #cbd5e1; border-left: 4px solid #0284c7; border-radius: 8px; padding: 12px 14px;">
+                      <div style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 700; margin-bottom: 4px;">Outdoor Temperature</div>
+                      <div style="font-size: 18px; font-weight: 700; color: #0f172a;">{weather['outdoor_temp_c']}°C <span style="font-size: 13px; color: #64748b; font-weight: 500;">({weather['outdoor_temp_f']}°F)</span></div>
+                    </div>
+                  </td>
+                  <td width="50%" style="padding: 6px 0 6px 8px; vertical-align: top;">
+                    <div style="background-color: #ffffff; border: 1px solid #cbd5e1; border-left: 4px solid #0284c7; border-radius: 8px; padding: 12px 14px;">
+                      <div style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 700; margin-bottom: 4px;">Humidity & Barometer</div>
+                      <div style="font-size: 18px; font-weight: 700; color: #0f172a;">{weather['humidity_pct']}% <span style="font-size: 13px; color: #64748b; font-weight: 500;">/ {weather['pressure_hpa']} hPa</span></div>
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td width="50%" style="padding: 6px 8px 6px 0; vertical-align: top;">
+                    <div style="background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 14px;">
+                      <div style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 700; margin-bottom: 4px;">Wind & Gusts</div>
+                      <div style="font-size: 16px; font-weight: 700; color: #0f172a;">{weather['wind_kmh']} km/h <span style="font-size: 12px; color: #64748b;">(Gust: {weather['wind_gust_kmh']})</span></div>
+                    </div>
+                  </td>
+                  <td width="50%" style="padding: 6px 0 6px 8px; vertical-align: top;">
+                    <div style="background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 14px;">
+                      <div style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 700; margin-bottom: 4px;">Solar Irradiance / Rain</div>
+                      <div style="font-size: 16px; font-weight: 700; color: #0f172a;">{weather['solar_radiation_wm2']} W/m² <span style="font-size: 12px; color: #64748b;">({weather['daily_rain_mm']} mm)</span></div>
+                    </div>
+                  </td>
+                </tr>
+              </table>
+            </div>
+
+          </td>
+        </tr>
+
+        <!-- Footer -->
+        <tr>
+          <td style="background-color: #f8fafc; border-top: 1px solid #e2e8f0; padding: 16px 28px; text-align: center; font-size: 12px; color: #64748b;">
+            Renology Solar Monitoring Suite • Automated Sunset Dispatch to {DEFAULT_RECIPIENT}<br>
+            <a href="https://renology-952659886764.us-central1.run.app" style="color: #2563eb; text-decoration: underline; font-weight: 500;">Open Live Cloud Run Solar Dashboard</a>
+          </td>
+        </tr>
+
+      </table>
+    </td>
+  </tr>
+</table>
 </body>
 </html>
 """
