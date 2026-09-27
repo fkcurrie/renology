@@ -106,7 +106,10 @@ func (c *Client) Start(ctx context.Context) error {
 
 		err = c.connectAndSetup(scanResult.Address)
 		if err != nil {
-			log.Printf("[Renogy] Connection failed: %v. Retrying in %v...", err, backoff)
+			if c.config.Storage != nil {
+				_ = c.config.Storage.RecordRFMeasurement(time.Now(), scanResult.Address.String(), scanResult.LocalName(), int(scanResult.RSSI), false, err.Error())
+			}
+			log.Printf("[Renogy] Connection failed (RSSI: %d dBm): %v. Retrying in %v...", scanResult.RSSI, err, backoff)
 			select {
 			case <-time.After(backoff):
 			case <-ctx.Done():
@@ -116,10 +119,15 @@ func (c *Client) Start(ctx context.Context) error {
 			continue
 		}
 
-		// Successfully connected, reset backoff
+		// Successfully connected!
+		if c.config.Storage != nil {
+			_ = c.config.Storage.RecordRFMeasurement(time.Now(), scanResult.Address.String(), scanResult.LocalName(), int(scanResult.RSSI), true, "")
+		}
 		backoff = 2 * time.Second
-		log.Printf("[Renogy] Connected to %s! Starting polling loop every %v...",
-			c.config.TargetMAC, c.config.PollInterval)
+		log.Printf("*******************************************************************************")
+		log.Printf("[Renogy] >>> CONNECTION ESTABLISHED at RSSI %d dBm! <<<", scanResult.RSSI)
+		log.Printf("[Renogy] Starting 5-second Modbus telemetry polling loop...")
+		log.Printf("*******************************************************************************")
 
 		if err := c.pollLoop(ctx, scanResult.LocalName(), scanResult.Address.String(), int(scanResult.RSSI)); err != nil {
 			log.Printf("[Renogy] Polling ended: %v. Reconnecting...", err)

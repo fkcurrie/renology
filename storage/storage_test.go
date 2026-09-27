@@ -55,4 +55,14 @@ func TestStorageSave(t *testing.T) {
 	if err != nil || len(csvData) == 0 {
 		t.Fatalf("CSV missing or empty")
 	}
+
+	// Verify RecordRFMeasurement
+	if err := s.RecordRFMeasurement(time.Now(), "60:98:66:F9:84:D6", "BT-TH-66F984D6", -88, true, ""); err != nil {
+		t.Fatalf("RecordRFMeasurement error: %v", err)
+	}
+
+	rfData, err := os.ReadFile(filepath.Join(tempDir, "rf_survey.csv"))
+	if err != nil || len(rfData) == 0 {
+		t.Fatalf("rf_survey.csv missing or empty")
+	}
 }

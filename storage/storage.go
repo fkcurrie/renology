@@ -20,6 +20,8 @@ type Storage struct {
 	latestPath   string
 	csvPath      string
 	csvHeaderSet bool
+	rfSurveyPath string
+	rfHeaderSet  bool
 }
 
 // NewStorage initializes storage files in the specified directory.
@@ -29,15 +31,19 @@ func NewStorage(dir string) (*Storage, error) {
 	}
 
 	s := &Storage{
-		outputDir:  dir,
-		jsonlPath:  filepath.Join(dir, "renology_telemetry.jsonl"),
-		latestPath: filepath.Join(dir, "latest_status.json"),
-		csvPath:    filepath.Join(dir, "renology_history.csv"),
+		outputDir:    dir,
+		jsonlPath:    filepath.Join(dir, "renology_telemetry.jsonl"),
+		latestPath:   filepath.Join(dir, "latest_status.json"),
+		csvPath:      filepath.Join(dir, "renology_history.csv"),
+		rfSurveyPath: filepath.Join(dir, "rf_survey.csv"),
 	}
 
 	// Check if CSV already has header
 	if fi, err := os.Stat(s.csvPath); err == nil && fi.Size() > 0 {
 		s.csvHeaderSet = true
+	}
+	if fi, err := os.Stat(s.rfSurveyPath); err == nil && fi.Size() > 0 {
+		s.rfHeaderSet = true
 	}
 
 	return s, nil
@@ -119,5 +125,45 @@ func (s *Storage) Save(t *models.Telemetry) error {
 		csvFile.Close()
 	}
 
+	return nil
+}
+
+// RecordRFMeasurement appends an RF advertisement and connection attempt log entry.
+func (s *Storage) RecordRFMeasurement(t time.Time, mac, name string, rssi int, connected bool, errStr string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if t.IsZero() {
+		t = time.Now()
+	}
+
+	f, err := os.OpenFile(s.rfSurveyPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("open rf_survey.csv error: %w", err)
+	}
+	defer f.Close()
+
+	writer := csv.NewWriter(f)
+	if !s.rfHeaderSet {
+		_ = writer.Write([]string{
+			"timestamp", "mac_address", "device_name", "rssi_dbm", "connected", "error_detail",
+		})
+		s.rfHeaderSet = true
+	}
+
+	connStr := "false"
+	if connected {
+		connStr = "true"
+	}
+
+	_ = writer.Write([]string{
+		t.Format(time.RFC3339),
+		mac,
+		name,
+		fmt.Sprintf("%d", rssi),
+		connStr,
+		errStr,
+	})
+	writer.Flush()
 	return nil
 }
