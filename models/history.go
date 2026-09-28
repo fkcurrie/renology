@@ -5,10 +5,11 @@ import "time"
 // HistoryPoint24h represents a downsampled time-series point for the 24-hour solar power chart.
 type HistoryPoint24h struct {
 	Timestamp      time.Time `json:"timestamp"`
-	TimeLabel      string    `json:"time_label"`       // e.g. "08:15"
-	SolarPowerW    int       `json:"solar_power_w"`    // Solar Watts
-	PVVoltage      float64   `json:"pv_voltage_v"`     // Panel Voltage
-	BatterySOC     int       `json:"battery_soc"`      // Battery State of Charge %
+	TimeLabel      string    `json:"time_label"`        // e.g. "08:15"
+	SolarPowerW    int       `json:"solar_power_w"`     // Solar Watts actually drawn
+	BatteryPowerW  int       `json:"battery_power_w"`   // Battery Routing Watts (Vbat * Ibat)
+	PVVoltage      float64   `json:"pv_voltage_v"`      // Solar Panel Voltage
+	BatterySOC     int       `json:"battery_soc"`       // Battery State of Charge %
 	BatteryVoltage float64   `json:"battery_voltage_v"` // Battery Voltage
 }
 

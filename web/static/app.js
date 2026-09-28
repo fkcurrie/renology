@@ -484,18 +484,24 @@
   requestAnimationFrame(animateNeedles);
 
   // =========================================================================
-  // 24-HOUR SOLAR POWER CHART
+  // 24-HOUR SOLAR POWER & VOLTAGE DUAL-AXIS CHART
   // =========================================================================
+  let cachedPoints24h = null;
+  let cachedMetrics24h = null;
+  let activeHoverIdx24h = -1;
+
   function draw24hChart(points) {
     if (!ctx24h || !points || points.length === 0) return;
+    cachedPoints24h = points;
     const dims = setupHiDPI(canvas24h, ctx24h);
     if (!dims) return;
     const w = dims.width;
     const h = dims.height;
 
+    // Margins: left for Watts, right for Volts, bottom for timestamps
     const padLeft = 45;
-    const padRight = 20;
-    const padTop = 15;
+    const padRight = 38;
+    const padTop = 16;
     const padBottom = 26;
     const plotW = w - padLeft - padRight;
     const plotH = h - padTop - padBottom;
@@ -503,80 +509,178 @@
     ctx24h.clearRect(0, 0, w, h);
 
     let maxW = 50;
+    let maxV = 40;
+    let peakSolarW = 0;
+    let peakSolarV = 0;
+
     points.forEach(p => {
-      if (p.solar_power_w > maxW) maxW = p.solar_power_w;
+      const sw = p.solar_power_w || 0;
+      const bw = p.battery_power_w || 0;
+      const pvV = p.pv_voltage_v || 0;
+      if (sw > peakSolarW) peakSolarW = sw;
+      if (pvV > peakSolarV) peakSolarV = pvV;
+      if (sw > maxW) maxW = sw;
+      if (bw > maxW) maxW = bw;
+      if (pvV > maxV) maxV = pvV;
     });
+
     maxW = Math.ceil(maxW / 50) * 50;
-    if (elPeak24h) elPeak24h.textContent = `24h Peak: ${maxW} W`;
+    maxV = Math.ceil(maxV / 10) * 10;
+    cachedMetrics24h = { padLeft, padRight, padTop, padBottom, plotW, plotH, maxW, maxV, w, h };
 
-    // 1. Grid Lines & Y-Axis Labels
-    ctx24h.font = '10px var(--font-mono)';
-    ctx24h.fillStyle = '#64748b';
-    ctx24h.textAlign = 'right';
+    if (elPeak24h) {
+      elPeak24h.textContent = `24h Peak: ${peakSolarW} W • Max Solar: ${peakSolarV.toFixed(1)} V`;
+    }
 
+    // 1. Grid Lines & Dual Y-Axis Labels
     const ySteps = 4;
     for (let i = 0; i <= ySteps; i++) {
       const yVal = Math.round((maxW / ySteps) * i);
+      const vVal = Math.round((maxV / ySteps) * i);
       const yPos = padTop + plotH - (i / ySteps) * plotH;
 
       ctx24h.beginPath();
       ctx24h.moveTo(padLeft, yPos);
       ctx24h.lineTo(w - padRight, yPos);
-      ctx24h.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+      ctx24h.strokeStyle = 'rgba(255, 255, 255, 0.06)';
       ctx24h.lineWidth = 1;
       ctx24h.stroke();
 
+      // Left Y-Axis: Watts (Amber / Gray)
+      ctx24h.font = '10px var(--font-mono)';
+      ctx24h.fillStyle = i === ySteps ? '#fbbf24' : '#64748b';
+      ctx24h.textAlign = 'right';
       ctx24h.fillText(`${yVal}W`, padLeft - 6, yPos + 3);
+
+      // Right Y-Axis: Solar Volts (Cyan / Sky Blue)
+      ctx24h.fillStyle = i === ySteps ? '#38bdf8' : '#0284c7';
+      ctx24h.textAlign = 'left';
+      ctx24h.fillText(`${vVal}V`, w - padRight + 6, yPos + 3);
     }
 
-    // 2. Build Solar Path Points
+    // Axis Unit Headers
+    ctx24h.font = 'bold 9px var(--font-mono)';
+    ctx24h.fillStyle = '#f59e0b';
+    ctx24h.textAlign = 'right';
+    ctx24h.fillText('WATTS', padLeft - 6, padTop - 4);
+
+    ctx24h.fillStyle = '#38bdf8';
+    ctx24h.textAlign = 'left';
+    ctx24h.fillText('VOLTS', w - padRight + 6, padTop - 4);
+
+    // 2. Build Coordinate Sets
     const coords = [];
     points.forEach((p, idx) => {
       const x = padLeft + (idx / (points.length - 1)) * plotW;
-      const y = padTop + plotH - (p.solar_power_w / maxW) * plotH;
-      coords.push({ x, y, p });
+      const ySolar = padTop + plotH - ((p.solar_power_w || 0) / maxW) * plotH;
+      const yBatt = padTop + plotH - ((p.battery_power_w || 0) / maxW) * plotH;
+      const yVolt = padTop + plotH - ((p.pv_voltage_v || 0) / maxV) * plotH;
+      const ySoc = padTop + plotH - ((p.battery_soc || 0) / 100) * plotH;
+      coords.push({ x, ySolar, yBatt, yVolt, ySoc, p });
     });
 
-    // 3. Fill Gradient Area
+    // 3. Layer A: Battery SOC Overlay (Subtle dotted line, 0-100%)
+    ctx24h.beginPath();
+    ctx24h.setLineDash([3, 4]);
+    coords.forEach((pt, idx) => {
+      if (idx === 0) ctx24h.moveTo(pt.x, pt.ySoc);
+      else ctx24h.lineTo(pt.x, pt.ySoc);
+    });
+    ctx24h.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+    ctx24h.lineWidth = 1.2;
+    ctx24h.stroke();
+    ctx24h.setLineDash([]); // reset
+
+    // 4. Layer B: Solar Voltage Curve (Vivid Sky Blue #38bdf8)
+    // Maps out Solar Volts across the full 24 hours
+    ctx24h.save();
+    ctx24h.beginPath();
+    coords.forEach((pt, i) => {
+      if (i === 0) ctx24h.moveTo(pt.x, pt.yVolt);
+      else ctx24h.lineTo(pt.x, pt.yVolt);
+    });
+    ctx24h.strokeStyle = '#38bdf8';
+    ctx24h.lineWidth = 2.5;
+    ctx24h.shadowColor = '#0284c7';
+    ctx24h.shadowBlur = 6;
+    ctx24h.stroke();
+    ctx24h.restore();
+
+    // 5. Layer C: Solar Power Area Fill (Warm Amber)
     ctx24h.beginPath();
     ctx24h.moveTo(coords[0].x, padTop + plotH);
-    coords.forEach(pt => ctx24h.lineTo(pt.x, pt.y));
+    coords.forEach(pt => ctx24h.lineTo(pt.x, pt.ySolar));
     ctx24h.lineTo(coords[coords.length - 1].x, padTop + plotH);
     ctx24h.closePath();
 
     const areaGrad = ctx24h.createLinearGradient(0, padTop, 0, padTop + plotH);
     areaGrad.addColorStop(0, 'rgba(245, 158, 11, 0.35)');
-    areaGrad.addColorStop(0.7, 'rgba(245, 158, 11, 0.05)');
+    areaGrad.addColorStop(0.7, 'rgba(245, 158, 11, 0.08)');
     areaGrad.addColorStop(1, 'rgba(245, 158, 11, 0.0)');
     ctx24h.fillStyle = areaGrad;
     ctx24h.fill();
 
-    // 4. Stroke Solar Power Line
+    // 6. Layer D: Solar Power Line (Amber)
     ctx24h.beginPath();
     coords.forEach((pt, i) => {
-      if (i === 0) ctx24h.moveTo(pt.x, pt.y);
-      else ctx24h.lineTo(pt.x, pt.y);
+      if (i === 0) ctx24h.moveTo(pt.x, pt.ySolar);
+      else ctx24h.lineTo(pt.x, pt.ySolar);
     });
     ctx24h.strokeStyle = '#f59e0b';
-    ctx24h.lineWidth = 2.5;
+    ctx24h.lineWidth = 2.0;
     ctx24h.stroke();
 
-    // 5. Battery SOC Overlay (Dotted emerald line, 0-100%)
+    // 7. Layer E: Battery Routing Power Line (Emerald Green)
     ctx24h.beginPath();
-    ctx24h.setLineDash([3, 4]);
-    points.forEach((p, idx) => {
-      const x = padLeft + (idx / (points.length - 1)) * plotW;
-      const soc = p.battery_soc || 0;
-      const y = padTop + plotH - (soc / 100) * plotH;
-      if (idx === 0) ctx24h.moveTo(x, y);
-      else ctx24h.lineTo(x, y);
+    coords.forEach((pt, i) => {
+      if (i === 0) ctx24h.moveTo(pt.x, pt.yBatt);
+      else ctx24h.lineTo(pt.x, pt.yBatt);
     });
-    ctx24h.strokeStyle = 'rgba(16, 185, 129, 0.5)';
-    ctx24h.lineWidth = 1.5;
+    ctx24h.strokeStyle = '#10b981';
+    ctx24h.lineWidth = 1.8;
     ctx24h.stroke();
-    ctx24h.setLineDash([]); // reset
 
-    // 6. X-Axis Time Labels
+    // 8. Layer F: Active Hover / Touch Indicator Crosshair
+    if (activeHoverIdx24h >= 0 && activeHoverIdx24h < coords.length) {
+      const hPt = coords[activeHoverIdx24h];
+      ctx24h.beginPath();
+      ctx24h.moveTo(hPt.x, padTop);
+      ctx24h.lineTo(hPt.x, padTop + plotH);
+      ctx24h.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx24h.lineWidth = 1.5;
+      ctx24h.setLineDash([2, 3]);
+      ctx24h.stroke();
+      ctx24h.setLineDash([]);
+
+      // Solar Volts dot (blue)
+      ctx24h.beginPath();
+      ctx24h.arc(hPt.x, hPt.yVolt, 4.5, 0, 2 * Math.PI);
+      ctx24h.fillStyle = '#38bdf8';
+      ctx24h.fill();
+      ctx24h.strokeStyle = '#fff';
+      ctx24h.lineWidth = 1.5;
+      ctx24h.stroke();
+
+      // Solar Power dot (amber)
+      ctx24h.beginPath();
+      ctx24h.arc(hPt.x, hPt.ySolar, 4, 0, 2 * Math.PI);
+      ctx24h.fillStyle = '#f59e0b';
+      ctx24h.fill();
+      ctx24h.strokeStyle = '#fff';
+      ctx24h.lineWidth = 1.5;
+      ctx24h.stroke();
+
+      // Battery Power dot (emerald)
+      ctx24h.beginPath();
+      ctx24h.arc(hPt.x, hPt.yBatt, 3.5, 0, 2 * Math.PI);
+      ctx24h.fillStyle = '#10b981';
+      ctx24h.fill();
+      ctx24h.strokeStyle = '#fff';
+      ctx24h.lineWidth = 1.5;
+      ctx24h.stroke();
+    }
+
+    // 9. X-Axis Time Labels
     ctx24h.font = '10px var(--font-family)';
     ctx24h.fillStyle = '#94a3b8';
     ctx24h.textAlign = 'center';
@@ -584,9 +688,88 @@
     const hourStep = Math.max(1, Math.floor(points.length / 6));
     for (let idx = 0; idx < points.length; idx += hourStep) {
       const pt = coords[idx];
-      const timeStr = pt.p.timestamp ? pt.p.timestamp.split('T')[1].substring(0, 5) : '';
+      const timeStr = pt.p.timestamp ? (pt.p.timestamp.includes('T') ? pt.p.timestamp.split('T')[1].substring(0, 5) : pt.p.timestamp) : (pt.p.time_label || '');
       ctx24h.fillText(timeStr, pt.x, h - 8);
     }
+  }
+
+  // Hover and Touch interaction handlers for 24h chart
+  function handle24hHover(clientX, clientY) {
+    if (!canvas24h || !cachedPoints24h || !cachedMetrics24h || !tooltip24h) return;
+    const rect = canvas24h.getBoundingClientRect();
+    const xInCanvas = (clientX - rect.left) * (cachedMetrics24h.w / rect.width);
+    const { padLeft, plotW } = cachedMetrics24h;
+
+    const xRel = xInCanvas - padLeft;
+    if (xRel < 0 || xRel > plotW) {
+      tooltip24h.style.display = 'none';
+      if (activeHoverIdx24h !== -1) {
+        activeHoverIdx24h = -1;
+        draw24hChart(cachedPoints24h);
+      }
+      return;
+    }
+
+    const ratio = Math.max(0, Math.min(1, xRel / plotW));
+    const idx = Math.min(cachedPoints24h.length - 1, Math.round(ratio * (cachedPoints24h.length - 1)));
+    activeHoverIdx24h = idx;
+    draw24hChart(cachedPoints24h);
+
+    const p = cachedPoints24h[idx];
+    const pvV = (p.pv_voltage_v || 0).toFixed(1);
+    const solW = p.solar_power_w || 0;
+    const battW = p.battery_power_w || 0;
+    const soc = p.battery_soc || 0;
+    const battV = (p.battery_voltage_v || 0).toFixed(2);
+    const timeStr = p.timestamp ? (p.timestamp.includes('T') ? p.timestamp.split('T')[1].substring(0, 5) : p.timestamp) : (p.time_label || '');
+
+    let badge = '';
+    if (p.pv_voltage_v >= 20.0 && solW === 0 && soc >= 98) {
+      badge = '<div style="margin-top: 4px; padding: 2px 6px; background: rgba(245, 158, 11, 0.2); border: 1px solid rgba(245, 158, 11, 0.6); border-radius: 4px; font-size: 10px; color: #fef08a;">☀️ Sun Active • Solar Curtailed (Battery Full)</div>';
+    } else if (p.pv_voltage_v >= 20.0 && solW > 0) {
+      badge = '<div style="margin-top: 4px; padding: 2px 6px; background: rgba(16, 185, 129, 0.2); border: 1px solid rgba(16, 185, 129, 0.6); border-radius: 4px; font-size: 10px; color: #6ee7b7;">⚡ Active Solar Charging</div>';
+    } else if (p.pv_voltage_v < 8.0) {
+      badge = '<div style="margin-top: 4px; padding: 2px 6px; background: rgba(100, 116, 139, 0.2); border: 1px solid rgba(100, 116, 139, 0.4); border-radius: 4px; font-size: 10px; color: #94a3b8;">🌙 Night / No Sun</div>';
+    }
+
+    tooltip24h.innerHTML = `
+      <div style="font-weight: 700; color: #f8fafc; margin-bottom: 4px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 2px;">🕒 ${timeStr}</div>
+      <div style="color: #38bdf8; font-weight: 600;">☀️ Solar Panel: <strong>${pvV} V</strong></div>
+      <div style="color: #f59e0b; font-weight: 600;">⚡ Solar Drawn: <strong>${solW} W</strong></div>
+      <div style="color: #10b981; font-weight: 600;">🔋 Battery Power: <strong>${battW} W</strong></div>
+      <div style="color: #cbd5e1; font-size: 10px;">🟢 Battery SOC: <strong>${soc}%</strong> (${battV}V)</div>
+      ${badge}
+    `;
+
+    tooltip24h.style.display = 'block';
+    const tipX = clientX - rect.left;
+    const tipY = clientY - rect.top;
+    
+    if (tipX > rect.width * 0.6) {
+      tooltip24h.style.left = `${tipX - 190}px`;
+    } else {
+      tooltip24h.style.left = `${tipX + 15}px`;
+    }
+    tooltip24h.style.top = `${Math.max(10, tipY - 50)}px`;
+  }
+
+  function handle24hLeave() {
+    if (tooltip24h) tooltip24h.style.display = 'none';
+    if (activeHoverIdx24h !== -1) {
+      activeHoverIdx24h = -1;
+      if (cachedPoints24h) draw24hChart(cachedPoints24h);
+    }
+  }
+
+  if (canvas24h) {
+    canvas24h.addEventListener('mousemove', e => handle24hHover(e.clientX, e.clientY));
+    canvas24h.addEventListener('mouseleave', handle24hLeave);
+    canvas24h.addEventListener('touchmove', e => {
+      if (e.touches.length > 0) {
+        handle24hHover(e.touches[0].clientX, e.touches[0].clientY);
+      }
+    }, { passive: true });
+    canvas24h.addEventListener('touchend', handle24hLeave);
   }
 
   // =========================================================================

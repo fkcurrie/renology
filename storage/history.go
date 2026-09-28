@@ -99,11 +99,12 @@ func (s *Storage) build24hSeries(records []models.Telemetry, now time.Time) []mo
 	points := make([]models.HistoryPoint24h, 0, numBuckets)
 
 	type bucketData struct {
-		count       int
-		sumWatts    int
-		sumVolts    float64
-		sumSOC      int
-		sumBattVolt float64
+		count        int
+		sumWatts     int
+		sumBattWatts float64
+		sumVolts     float64
+		sumSOC       int
+		sumBattVolt  float64
 	}
 
 	buckets := make(map[int]*bucketData)
@@ -129,6 +130,11 @@ func (s *Storage) build24hSeries(records []models.Telemetry, now time.Time) []mo
 		}
 		b.count++
 		b.sumWatts += r.PVPower
+		battWatts := r.BatteryPower
+		if battWatts == 0 && r.BatteryCurrent > 0 {
+			battWatts = r.BatteryVoltage * r.BatteryCurrent
+		}
+		b.sumBattWatts += battWatts
 		b.sumVolts += r.PVVoltage
 		b.sumSOC += r.BatterySOC
 		b.sumBattVolt += r.BatteryVoltage
@@ -144,6 +150,7 @@ func (s *Storage) build24hSeries(records []models.Telemetry, now time.Time) []mo
 				Timestamp:      tBucket,
 				TimeLabel:      timeLabel,
 				SolarPowerW:    b.sumWatts / b.count,
+				BatteryPowerW:  int(math.Round(b.sumBattWatts / float64(b.count))),
 				PVVoltage:      math.Round((b.sumVolts/float64(b.count))*10) / 10,
 				BatterySOC:     b.sumSOC / b.count,
 				BatteryVoltage: math.Round((b.sumBattVolt/float64(b.count))*100) / 100,
@@ -155,6 +162,7 @@ func (s *Storage) build24hSeries(records []models.Telemetry, now time.Time) []mo
 				Timestamp:      tBucket,
 				TimeLabel:      timeLabel,
 				SolarPowerW:    watts,
+				BatteryPowerW:  watts,
 				PVVoltage:      pvVolts,
 				BatterySOC:     soc,
 				BatteryVoltage: battVolts,

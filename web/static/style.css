@@ -920,7 +920,9 @@ body.kiosk-mode {
 }
 
 .solar-dot { background-color: var(--accent-gold); box-shadow: 0 0 6px var(--accent-gold); }
-.soc-dot { background-color: var(--accent-emerald); box-shadow: 0 0 6px var(--accent-emerald); }
+.volt-dot { background-color: #38bdf8; box-shadow: 0 0 6px #38bdf8; }
+.batt-dot { background-color: var(--accent-emerald); box-shadow: 0 0 6px var(--accent-emerald); }
+.soc-dot { background-color: rgba(255, 255, 255, 0.5); box-shadow: 0 0 4px rgba(255, 255, 255, 0.4); }
 .bar-dot { background-color: var(--accent-cyan); box-shadow: 0 0 6px var(--accent-cyan); }
 .peak-dot { background-color: var(--accent-gold); box-shadow: 0 0 6px var(--accent-gold); }
 
