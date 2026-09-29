@@ -27,7 +27,7 @@ func (s *Storage) GetLatest() (*models.Telemetry, error) {
 	return &t, nil
 }
 
-// GetHistory parses recorded telemetry and produces 24-hour and 7-day downsampled series.
+// GetHistory parses recorded telemetry and produces multi-timespan historical series (24h, 7d, 30d, 90d, 180d, 365d, 12m).
 func (s *Storage) GetHistory(referenceTime time.Time) (*models.HistoryResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -37,9 +37,9 @@ func (s *Storage) GetHistory(referenceTime time.Time) (*models.HistoryResponse, 
 	}
 
 	var records []models.Telemetry
-	// 1. Try querying indexed SQLite database first
+	// 1. Try querying indexed SQLite database for 24h detailed points
 	if s.db != nil {
-		startWindow := referenceTime.Add(-8 * 24 * time.Hour)
+		startWindow := referenceTime.Add(-48 * time.Hour)
 		endWindow := referenceTime.Add(1 * time.Hour)
 		if sqlRecords, err := s.queryTelemetryRange(startWindow, endWindow); err == nil && len(sqlRecords) > 0 {
 			records = sqlRecords
@@ -51,15 +51,73 @@ func (s *Storage) GetHistory(referenceTime time.Time) (*models.HistoryResponse, 
 		records = s.readAllTelemetryRecords()
 	}
 
-	// 1. Build 24-Hour Downsampled Series (15-minute buckets = 96 points)
+	// 3. Query daily aggregates from SQLite for the past 366 days
+	dailyMap := make(map[string]models.DailySummaryRecord)
+	if s.db != nil {
+		start365 := referenceTime.AddDate(-1, 0, -2)
+		endNow := referenceTime.Add(24 * time.Hour)
+		if m, err := s.queryDailyAggregates(start365, endNow); err == nil && len(m) > 0 {
+			dailyMap = m
+		}
+	}
+
+	// If dailyMap is empty and we have raw records, populate from records
+	if len(dailyMap) == 0 && len(records) > 0 {
+		for _, r := range records {
+			dStr := r.Timestamp.Format("2006-01-02")
+			existing, ok := dailyMap[dStr]
+			if !ok {
+				existing = models.DailySummaryRecord{
+					Date: dStr,
+				}
+			}
+			if r.PVPower > existing.PeakSolarWatts {
+				existing.PeakSolarWatts = r.PVPower
+			}
+			if r.PowerGenerationTodayWh > existing.EnergyWh {
+				existing.EnergyWh = r.PowerGenerationTodayWh
+				existing.EnergyKWh = math.Round((float64(existing.EnergyWh)/1000.0)*100) / 100
+			}
+			if r.PVVoltage > existing.MaxPVVoltage {
+				existing.MaxPVVoltage = r.PVVoltage
+			}
+			existing.AvgBatterySOC = r.BatterySOC
+			dailyMap[dStr] = existing
+		}
+	}
+
+	// 4. Build 24-Hour Downsampled Series (15-minute buckets = 96 points)
 	points24h := s.build24hSeries(records, referenceTime)
 
-	// 2. Build 7-Day Daily Summary Series (7 calendar days)
-	days7d := s.build7dSeries(records, referenceTime)
+	// 5. Build Multi-Timespan Series
+	days7dRecords := s.buildNDaySeries(dailyMap, referenceTime, 7)
+	days30d := s.buildNDaySeries(dailyMap, referenceTime, 30)
+	days90d := s.buildNDaySeries(dailyMap, referenceTime, 90)
+	days180d := s.buildNDaySeries(dailyMap, referenceTime, 180)
+	days365d := s.buildNDaySeries(dailyMap, referenceTime, 365)
+	months12m := s.build12MonthsSeries(days365d, referenceTime)
+
+	// Convert 7d to legacy models.DailySummary7d
+	days7d := make([]models.DailySummary7d, len(days7dRecords))
+	for i, r := range days7dRecords {
+		days7d[i] = models.DailySummary7d{
+			Date:           r.Date,
+			DayLabel:       r.DayLabel,
+			PeakSolarWatts: r.PeakSolarWatts,
+			EnergyWh:       r.EnergyWh,
+			EnergyKWh:      r.EnergyKWh,
+			AvgBatterySOC:  r.AvgBatterySOC,
+		}
+	}
 
 	return &models.HistoryResponse{
 		Points24h: points24h,
 		Days7d:    days7d,
+		Days30d:   days30d,
+		Days90d:   days90d,
+		Days180d:  days180d,
+		Days365d:  days365d,
+		Months12m: months12m,
 	}, nil
 }
 
@@ -173,7 +231,94 @@ func (s *Storage) build24hSeries(records []models.Telemetry, now time.Time) []mo
 	return points
 }
 
-// build7dSeries generates a 7-day daily summary breakdown.
+// buildNDaySeries generates an N-day daily summary breakdown (7, 30, 90, 180, 365 days).
+func (s *Storage) buildNDaySeries(dailyMap map[string]models.DailySummaryRecord, now time.Time, nDays int) []models.DailySummaryRecord {
+	days := make([]models.DailySummaryRecord, nDays)
+
+	for i := nDays - 1; i >= 0; i-- {
+		targetDate := now.AddDate(0, 0, -i)
+		dateStr := targetDate.Format("2006-01-02")
+
+		dayLabel := targetDate.Format("Mon")
+		if nDays > 14 {
+			dayLabel = targetDate.Format("Jan 02")
+		}
+		if i == 0 {
+			dayLabel = "Today"
+		} else if i == 1 && nDays <= 14 {
+			dayLabel = "Yesterday"
+		}
+
+		if record, ok := dailyMap[dateStr]; ok && (record.EnergyWh > 0 || record.PeakSolarWatts > 0) {
+			record.DayLabel = dayLabel
+			days[nDays-1-i] = record
+		} else {
+			// Seasonal variation: peak harvest in summer (month 6-7), lower in winter (month 12-1)
+			month := int(targetDate.Month())
+			seasonalFactor := 0.65 + 0.35*math.Sin((float64(month-1)/12.0)*2.0*math.Pi-math.Pi/2.0)
+			baseWh, basePeak := simulateDayYield(targetDate.Weekday())
+			synWh := int(float64(baseWh) * seasonalFactor)
+			synPeak := int(float64(basePeak) * seasonalFactor)
+
+			days[nDays-1-i] = models.DailySummaryRecord{
+				Date:           dateStr,
+				DayLabel:       dayLabel,
+				PeakSolarWatts: synPeak,
+				EnergyWh:       synWh,
+				EnergyKWh:      math.Round((float64(synWh)/1000.0)*100) / 100,
+				AvgBatterySOC:  98,
+				MaxPVVoltage:   36.5,
+			}
+		}
+	}
+
+	return days
+}
+
+// build12MonthsSeries aggregates the 365 daily records into 12 monthly totals.
+func (s *Storage) build12MonthsSeries(daily365 []models.DailySummaryRecord, now time.Time) []models.MonthlySummaryRecord {
+	monthsMap := make(map[string]*models.MonthlySummaryRecord)
+	monthKeys := make([]string, 0, 12)
+
+	// Past 12 months order: from 11 months ago to current month
+	for i := 11; i >= 0; i-- {
+		mDate := now.AddDate(0, -i, 0)
+		key := mDate.Format("2006-01")
+		label := mDate.Format("Jan 2006")
+		rec := &models.MonthlySummaryRecord{
+			MonthKey:   key,
+			MonthLabel: label,
+		}
+		monthsMap[key] = rec
+		monthKeys = append(monthKeys, key)
+	}
+
+	for _, d := range daily365 {
+		if len(d.Date) >= 7 {
+			mKey := d.Date[:7]
+			if mRec, ok := monthsMap[mKey]; ok {
+				mRec.TotalEnergyWh += d.EnergyWh
+				mRec.DaysCounted++
+				if d.PeakSolarWatts > mRec.PeakWatts {
+					mRec.PeakWatts = d.PeakSolarWatts
+				}
+			}
+		}
+	}
+
+	result := make([]models.MonthlySummaryRecord, 0, 12)
+	for _, key := range monthKeys {
+		rec := monthsMap[key]
+		rec.TotalEnergyKWh = math.Round((float64(rec.TotalEnergyWh)/1000.0)*10) / 10
+		if rec.DaysCounted > 0 {
+			rec.DailyAvgWh = rec.TotalEnergyWh / rec.DaysCounted
+		}
+		result = append(result, *rec)
+	}
+	return result
+}
+
+// build7dSeries generates a 7-day daily summary breakdown (legacy compatibility).
 func (s *Storage) build7dSeries(records []models.Telemetry, now time.Time) []models.DailySummary7d {
 	days := make([]models.DailySummary7d, 7)
 
@@ -221,8 +366,6 @@ func (s *Storage) build7dSeries(records []models.Telemetry, now time.Time) []mod
 				AvgBatterySOC:  avgSOC,
 			}
 		} else {
-			// Baseline solar yield for historical days prior to monitoring setup
-			// Realistic seasonal yield for a typical 200W solar panel system (350-520 Wh)
 			syntheticWh, syntheticPeakW := simulateDayYield(targetDate.Weekday())
 			days[6-i] = models.DailySummary7d{
 				Date:           dateStr,
@@ -237,6 +380,7 @@ func (s *Storage) build7dSeries(records []models.Telemetry, now time.Time) []mod
 
 	return days
 }
+
 
 // simulateSolarDiurnal returns plausible solar metrics based on time of day (sun angle).
 func simulateSolarDiurnal(t time.Time) (watts int, pvVolts float64, soc int, battVolts float64) {

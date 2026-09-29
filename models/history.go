@@ -23,10 +23,37 @@ type DailySummary7d struct {
 	AvgBatterySOC  int     `json:"avg_battery_soc"` // Average battery SOC %
 }
 
-// HistoryResponse encapsulates both 24-hour and 7-day historical telemetry data.
+// DailySummaryRecord represents a daily solar production record across multiple timespans.
+type DailySummaryRecord struct {
+	Date           string  `json:"date"`            // "2026-09-27"
+	DayLabel       string  `json:"day_label"`       // e.g. "Mon", "Sep 27"
+	PeakSolarWatts int     `json:"peak_solar_w"`    // Peak solar generation (Watts)
+	EnergyWh       int     `json:"energy_wh"`       // Total daily energy generated (Wh)
+	EnergyKWh      float64 `json:"energy_kwh"`      // Total daily energy generated (kWh)
+	AvgBatterySOC  int     `json:"avg_battery_soc"` // Average battery SOC %
+	MaxPVVoltage   float64 `json:"max_pv_v"`        // Max solar volts recorded
+}
+
+// MonthlySummaryRecord represents an aggregated monthly production record for the 1-year view.
+type MonthlySummaryRecord struct {
+	MonthKey       string  `json:"month_key"`       // "2026-09"
+	MonthLabel     string  `json:"month_label"`     // e.g. "Sep 2026"
+	TotalEnergyWh  int     `json:"total_energy_wh"` // Total generation in month (Wh)
+	TotalEnergyKWh float64 `json:"total_energy_kwh"`// Total generation in month (kWh)
+	PeakWatts      int     `json:"peak_watts"`      // Peak power observed in month (Watts)
+	DaysCounted    int     `json:"days_counted"`    // Number of days in month
+	DailyAvgWh     int     `json:"daily_avg_wh"`    // Daily average generation in Wh
+}
+
+// HistoryResponse encapsulates both 24-hour and multi-timespan historical telemetry data.
 type HistoryResponse struct {
-	Points24h []HistoryPoint24h `json:"points_24h"`
-	Days7d    []DailySummary7d  `json:"days_7d"`
+	Points24h []HistoryPoint24h      `json:"points_24h"`
+	Days7d    []DailySummary7d       `json:"days_7d"`
+	Days30d   []DailySummaryRecord   `json:"days_30d"`
+	Days90d   []DailySummaryRecord   `json:"days_90d"`
+	Days180d  []DailySummaryRecord   `json:"days_180d"`
+	Days365d  []DailySummaryRecord   `json:"days_365d"`
+	Months12m []MonthlySummaryRecord `json:"months_12m"`
 }
 
 // RecentMinutePoint represents an aggregated 1-minute point in a recent telemetry report.

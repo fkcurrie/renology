@@ -76,4 +76,22 @@ func TestGetHistoryAndLatest(t *testing.T) {
 	if todaySummary.EnergyWh != 350 {
 		t.Errorf("Expected today energy 350 Wh, got %d", todaySummary.EnergyWh)
 	}
+
+	// Verify multi-timespan fields
+	if len(hist.Days30d) != 30 {
+		t.Errorf("Expected 30 days in Days30d, got %d", len(hist.Days30d))
+	}
+	if len(hist.Days90d) != 90 {
+		t.Errorf("Expected 90 days in Days90d, got %d", len(hist.Days90d))
+	}
+	if len(hist.Days180d) != 180 {
+		t.Errorf("Expected 180 days in Days180d, got %d", len(hist.Days180d))
+	}
+	if len(hist.Days365d) != 365 {
+		t.Errorf("Expected 365 days in Days365d, got %d", len(hist.Days365d))
+	}
+	if len(hist.Months12m) != 12 {
+		t.Errorf("Expected 12 months in Months12m, got %d", len(hist.Months12m))
+	}
 }
+

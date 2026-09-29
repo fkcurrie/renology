@@ -186,6 +186,20 @@ def check_weather_pillar():
                     pillar["status"] = "WARN"
                     pillar["issues"].append(f"Weather station reports status: '{data.get('status')}'")
 
+                if not updated_at_str:
+                    # Query SQLite directly for latest timestamp if in-memory API is empty
+                    try:
+                        conn = sqlite3.connect(DB_PATH, timeout=2.0)
+                        c = conn.cursor()
+                        c.execute("SELECT timestamp FROM weather_telemetry ORDER BY timestamp DESC LIMIT 1")
+                        r = c.fetchone()
+                        if r and r[0]:
+                            updated_at_str = r[0][:19].replace("T", " ")
+                            pillar["updated_at"] = updated_at_str
+                        conn.close()
+                    except Exception:
+                        pass
+
                 # Check age if updated_at is present
                 if updated_at_str:
                     try:

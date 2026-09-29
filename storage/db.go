@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"strconv"
 	"time"
@@ -223,6 +224,44 @@ ORDER BY timestamp ASC`
 		}
 	}
 	return records, rows.Err()
+}
+
+// queryDailyAggregates returns daily aggregated solar statistics from SQLite.
+func (s *Storage) queryDailyAggregates(start, end time.Time) (map[string]models.DailySummaryRecord, error) {
+	if s.db == nil {
+		return nil, fmt.Errorf("sqlite db not initialized")
+	}
+
+	query := `
+SELECT date(timestamp) as day,
+       COALESCE(MAX(pv_w), 0) as peak_w,
+       COALESCE(MAX(power_gen_today_wh), 0) as max_wh,
+       COALESCE(ROUND(AVG(battery_soc)), 100) as avg_soc,
+       COALESCE(MAX(pv_v), 0.0) as max_pv_v
+FROM telemetry
+WHERE timestamp >= ? AND timestamp <= ?
+GROUP BY date(timestamp)
+ORDER BY day ASC`
+
+	rows, err := s.db.Query(query, start.Format(time.RFC3339Nano), end.Format(time.RFC3339Nano))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[string]models.DailySummaryRecord)
+	for rows.Next() {
+		var r models.DailySummaryRecord
+		var dayStr string
+		var avgSoc float64
+		if err := rows.Scan(&dayStr, &r.PeakSolarWatts, &r.EnergyWh, &avgSoc, &r.MaxPVVoltage); err == nil {
+			r.Date = dayStr
+			r.AvgBatterySOC = int(avgSoc)
+			r.EnergyKWh = math.Round((float64(r.EnergyWh)/1000.0)*100) / 100
+			result[dayStr] = r
+		}
+	}
+	return result, rows.Err()
 }
 
 // migrateLegacyJSONL reads existing JSONL lines and batch-inserts them into SQLite.

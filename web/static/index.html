@@ -226,11 +226,21 @@
         </div>
       </section>
 
-      <!-- Card 4: Last 24 Hours Solar Power Graph -->
+      <!-- Card 4: Interactive Solar Power & Harvest History Graph -->
       <section class="card chart-card chart-24h">
-        <div class="card-header">
-          <div class="card-icon chart-icon">📈</div>
-          <h2>SOLAR POWER — LAST 24 HOURS</h2>
+        <div class="card-header chart-header-row">
+          <div class="chart-title-group">
+            <div class="card-icon chart-icon">📈</div>
+            <h2 id="historyChartTitle">SOLAR POWER — TODAY (24H)</h2>
+          </div>
+          <div class="timespan-selector" id="timespanSelector" role="tablist" aria-label="Select Solar History Timespan">
+            <button class="span-btn active" data-span="today" role="tab" aria-selected="true">Today</button>
+            <button class="span-btn" data-span="week" role="tab" aria-selected="false">Week</button>
+            <button class="span-btn" data-span="month" role="tab" aria-selected="false">Month</button>
+            <button class="span-btn" data-span="quarter" role="tab" aria-selected="false">Quarter</button>
+            <button class="span-btn" data-span="halfyear" role="tab" aria-selected="false">Half Year</button>
+            <button class="span-btn" data-span="year" role="tab" aria-selected="false">Whole Year</button>
+          </div>
           <span class="chart-summary-badge" id="peak24hBadge">Peak: 0 W</span>
         </div>
 
@@ -239,11 +249,11 @@
           <div class="chart-tooltip" id="tooltip24h"></div>
         </div>
 
-        <div class="chart-legend">
-          <span class="legend-item"><span class="legend-dot volt-dot"></span> Solar Volts (V)</span>
-          <span class="legend-item"><span class="legend-dot solar-dot"></span> Solar Power (W)</span>
-          <span class="legend-item"><span class="legend-dot batt-dot"></span> Battery Power (W)</span>
-          <span class="legend-item"><span class="legend-dot soc-dot"></span> Battery SOC (%)</span>
+        <div class="chart-legend" id="historyChartLegend">
+          <span class="legend-item" id="legItemVolts"><span class="legend-dot volt-dot"></span> Solar Volts (V)</span>
+          <span class="legend-item" id="legItemPower"><span class="legend-dot solar-dot"></span> Solar Power (W)</span>
+          <span class="legend-item" id="legItemBatt"><span class="legend-dot batt-dot"></span> Battery Power (W)</span>
+          <span class="legend-item" id="legItemSoc"><span class="legend-dot soc-dot"></span> Battery SOC (%)</span>
           <span class="legend-time" id="window24hLabel">24-Hour Solar & Battery Flow</span>
         </div>
       </section>

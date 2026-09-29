@@ -93,6 +93,16 @@
   const tooltip24h = document.getElementById('tooltip24h');
   const tooltip7d = document.getElementById('tooltip7d');
 
+  // History Chart & Timespan Selector Elements
+  const elHistoryChartTitle = document.getElementById('historyChartTitle');
+  const elHistoryChartLegend = document.getElementById('historyChartLegend');
+  const elWindow24hLabel = document.getElementById('window24hLabel');
+  const elLegItemVolts = document.getElementById('legItemVolts');
+  const elLegItemPower = document.getElementById('legItemPower');
+  const elLegItemBatt = document.getElementById('legItemBatt');
+  const elLegItemSoc = document.getElementById('legItemSoc');
+  const elTimespanSelector = document.getElementById('timespanSelector');
+
   // --- Canvases ---
   const canvasGauge = document.getElementById('fuelGaugeCanvas');
   const ctxGauge = canvasGauge ? canvasGauge.getContext('2d') : null;
@@ -227,7 +237,7 @@
         const tx = cx + textR * cos;
         const ty = cy + textR * sin;
         ctxGauge.save();
-        ctxGauge.font = 'bold 11px ' + getComputedStyle(document.body).fontFamily;
+        ctxGauge.font = 'bold 11px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
         ctxGauge.textAlign = 'center';
         ctxGauge.textBaseline = 'middle';
         
@@ -397,7 +407,7 @@
         const tx = cx + textR * cos;
         const ty = cy + textR * sin;
         ctxSpeedo.save();
-        ctxSpeedo.font = 'bold 11px ' + getComputedStyle(document.body).fontFamily;
+        ctxSpeedo.font = 'bold 11px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
         ctxSpeedo.textAlign = 'center';
         ctxSpeedo.textBaseline = 'middle';
         ctxSpeedo.fillStyle = isRedline ? '#f87171' : '#f1f5f9';
@@ -461,6 +471,8 @@
     }
   }
 
+  let needleAnimId = null;
+
   // Smooth needle damping loop for both instrument dials
   function animateNeedles() {
     let changed = false;
@@ -470,6 +482,9 @@
       displayedSOC += diffSOC * 0.12;
       drawFuelGauge();
       changed = true;
+    } else if (displayedSOC !== targetSOC) {
+      displayedSOC = targetSOC;
+      drawFuelGauge();
     }
 
     const diffVolts = targetPvVolts - displayedPvVolts;
@@ -477,11 +492,24 @@
       displayedPvVolts += diffVolts * 0.10;
       drawSpeedometer();
       changed = true;
+    } else if (displayedPvVolts !== targetPvVolts) {
+      displayedPvVolts = targetPvVolts;
+      drawSpeedometer();
     }
 
-    requestAnimationFrame(animateNeedles);
+    if (changed) {
+      needleAnimId = requestAnimationFrame(animateNeedles);
+    } else {
+      needleAnimId = null;
+    }
   }
-  requestAnimationFrame(animateNeedles);
+
+  function triggerNeedleAnimation() {
+    if (!needleAnimId) {
+      needleAnimId = requestAnimationFrame(animateNeedles);
+    }
+  }
+  triggerNeedleAnimation();
 
   // =========================================================================
   // 24-HOUR SOLAR POWER & VOLTAGE DUAL-AXIS CHART
@@ -761,16 +789,690 @@
     }
   }
 
+  // =========================================================================
+  // MULTI-TIMESPAN SOLAR HARVEST CHARTS (Week, Month, Quarter, Half Year, Year)
+  // =========================================================================
+  let currentTimespan = 'today';
+  try {
+    const savedSpan = localStorage.getItem('renology_timespan');
+    if (savedSpan) currentTimespan = savedSpan;
+  } catch (_) {}
+
+  let cachedMultiDays = null;
+  let cachedMultiMetrics = null;
+  let activeHoverIdxMulti = -1;
+
+  let cachedYearMonths = null;
+  let cachedYearMetrics = null;
+  let activeHoverIdxYear = -1;
+
+  function drawMultiDayChart(days, mode) {
+    if (!ctx24h || !days || days.length === 0) return;
+    cachedMultiDays = days;
+    const dims = setupHiDPI(canvas24h, ctx24h);
+    if (!dims) return;
+    const w = dims.width;
+    const h = dims.height;
+
+    const padLeft = 48;
+    const padRight = 42;
+    const padTop = 20;
+    const padBottom = 28;
+    const plotW = w - padLeft - padRight;
+    const plotH = h - padTop - padBottom;
+
+    ctx24h.clearRect(0, 0, w, h);
+
+    let maxWh = 100;
+    let maxPeakW = 50;
+    let totalWh = 0;
+
+    days.forEach(d => {
+      const wh = d.energy_wh ?? d.total_energy_wh ?? 0;
+      const pw = d.peak_solar_w || 0;
+      totalWh += wh;
+      if (wh > maxWh) maxWh = wh;
+      if (pw > maxPeakW) maxPeakW = pw;
+    });
+
+    maxWh = Math.ceil(maxWh / 100) * 100;
+    maxPeakW = Math.ceil(maxPeakW / 50) * 50;
+    cachedMultiMetrics = { padLeft, padRight, padTop, padBottom, plotW, plotH, maxWh, maxPeakW, w, h, days };
+
+    const totalKWh = (totalWh / 1000.0).toFixed(2);
+    const avgWh = Math.round(totalWh / days.length);
+
+    if (elPeak24h) {
+      if (mode === 'week') {
+        elPeak24h.textContent = `7-Day Total: ${totalWh.toLocaleString()} Wh • Peak: ${maxPeakW} W`;
+      } else if (mode === 'month') {
+        elPeak24h.textContent = `30-Day: ${totalKWh} kWh (${totalWh.toLocaleString()} Wh) • Peak: ${maxPeakW} W`;
+      } else if (mode === 'quarter') {
+        elPeak24h.textContent = `Quarter: ${totalKWh} kWh • Daily Avg: ${avgWh} Wh • Peak: ${maxPeakW} W`;
+      } else if (mode === 'halfyear') {
+        elPeak24h.textContent = `6-Month: ${totalKWh} kWh • Daily Avg: ${avgWh} Wh • Peak: ${maxPeakW} W`;
+      } else {
+        elPeak24h.textContent = `Total: ${totalKWh} kWh • Peak: ${maxPeakW} W`;
+      }
+    }
+
+    // 1. Grid Lines & Dual Y-Axes
+    const ySteps = 4;
+    for (let i = 0; i <= ySteps; i++) {
+      const yWh = Math.round((maxWh / ySteps) * i);
+      const yWatts = Math.round((maxPeakW / ySteps) * i);
+      const yPos = padTop + plotH - (i / ySteps) * plotH;
+
+      ctx24h.beginPath();
+      ctx24h.moveTo(padLeft, yPos);
+      ctx24h.lineTo(w - padRight, yPos);
+      ctx24h.strokeStyle = 'rgba(255, 255, 255, 0.06)';
+      ctx24h.lineWidth = 1;
+      ctx24h.stroke();
+
+      // Left Y-Axis: Wh (Cyan)
+      ctx24h.font = '10px var(--font-mono)';
+      ctx24h.fillStyle = i === ySteps ? '#06b6d4' : '#64748b';
+      ctx24h.textAlign = 'right';
+      ctx24h.fillText(yWh >= 1000 ? `${(yWh / 1000).toFixed(1)}k` : `${yWh}`, padLeft - 6, yPos + 3);
+
+      // Right Y-Axis: Peak Watts (Amber)
+      ctx24h.fillStyle = i === ySteps ? '#fbbf24' : '#d97706';
+      ctx24h.textAlign = 'left';
+      ctx24h.fillText(`${yWatts}W`, w - padRight + 6, yPos + 3);
+    }
+
+    // Headers
+    ctx24h.font = 'bold 9px var(--font-mono)';
+    ctx24h.fillStyle = '#06b6d4';
+    ctx24h.textAlign = 'right';
+    ctx24h.fillText('YIELD (Wh)', padLeft - 6, padTop - 6);
+
+    ctx24h.fillStyle = '#f59e0b';
+    ctx24h.textAlign = 'left';
+    ctx24h.fillText('PEAK WATTS', w - padRight + 6, padTop - 6);
+
+    // 2. Draw Daily Bars
+    const barCount = days.length;
+    const slotW = plotW / barCount;
+    const barW = Math.max(2, Math.min(32, slotW * 0.72));
+
+    const coords = [];
+    days.forEach((d, idx) => {
+      const wh = d.energy_wh ?? d.total_energy_wh ?? 0;
+      const pw = d.peak_solar_w || 0;
+      const cx = padLeft + (idx + 0.5) * slotW;
+      const barH = (wh / maxWh) * plotH;
+      const bx = cx - barW / 2;
+      const by = padTop + plotH - barH;
+      const py = padTop + plotH - (pw / maxPeakW) * plotH;
+      coords.push({ cx, bx, by, barW, barH, py, d });
+
+      // Bar fill with gradient
+      const isToday = d.day_label === 'Today';
+      const isHovered = (activeHoverIdxMulti === idx);
+      const barGrad = ctx24h.createLinearGradient(0, by, 0, padTop + plotH);
+      if (isHovered) {
+        barGrad.addColorStop(0, '#ffffff');
+        barGrad.addColorStop(1, 'rgba(56, 189, 248, 0.7)');
+      } else if (isToday) {
+        barGrad.addColorStop(0, '#f59e0b');
+        barGrad.addColorStop(1, 'rgba(245, 158, 11, 0.35)');
+      } else {
+        barGrad.addColorStop(0, '#06b6d4');
+        barGrad.addColorStop(1, 'rgba(6, 182, 212, 0.25)');
+      }
+
+      ctx24h.fillStyle = barGrad;
+      ctx24h.beginPath();
+      if (barW >= 6) {
+        ctx24h.roundRect(bx, by, barW, barH, [3, 3, 0, 0]);
+      } else {
+        ctx24h.rect(bx, by, barW, barH);
+      }
+      ctx24h.fill();
+    });
+
+    // 3. Rolling Moving Average Line (Emerald)
+    const windowSize = barCount <= 7 ? 3 : (barCount <= 30 ? 5 : 7);
+    ctx24h.beginPath();
+    let started = false;
+    coords.forEach((pt, idx) => {
+      let sum = 0;
+      let count = 0;
+      for (let j = Math.max(0, idx - windowSize + 1); j <= idx; j++) {
+        sum += (days[j].energy_wh ?? days[j].total_energy_wh ?? 0);
+        count++;
+      }
+      const avg = sum / count;
+      const avgY = padTop + plotH - (avg / maxWh) * plotH;
+      if (!started) {
+        ctx24h.moveTo(pt.cx, avgY);
+        started = true;
+      } else {
+        ctx24h.lineTo(pt.cx, avgY);
+      }
+    });
+    ctx24h.strokeStyle = '#10b981';
+    ctx24h.lineWidth = 2.0;
+    ctx24h.stroke();
+
+    // 4. Peak Watts Trend Line (Amber dotted)
+    ctx24h.beginPath();
+    ctx24h.setLineDash([2, 3]);
+    coords.forEach((pt, idx) => {
+      if (idx === 0) ctx24h.moveTo(pt.cx, pt.py);
+      else ctx24h.lineTo(pt.cx, pt.py);
+    });
+    ctx24h.strokeStyle = 'rgba(245, 158, 11, 0.65)';
+    ctx24h.lineWidth = 1.4;
+    ctx24h.stroke();
+    ctx24h.setLineDash([]);
+
+    // Dots on Peak Watts for smaller sets
+    if (barCount <= 30) {
+      coords.forEach(pt => {
+        if (pt.d.peak_solar_w > 0) {
+          ctx24h.beginPath();
+          ctx24h.arc(pt.cx, pt.py, 3, 0, 2 * Math.PI);
+          ctx24h.fillStyle = '#fbbf24';
+          ctx24h.fill();
+        }
+      });
+    }
+
+    // 5. Active Hover Crosshair
+    if (activeHoverIdxMulti >= 0 && activeHoverIdxMulti < coords.length) {
+      const hPt = coords[activeHoverIdxMulti];
+      ctx24h.beginPath();
+      ctx24h.moveTo(hPt.cx, padTop);
+      ctx24h.lineTo(hPt.cx, padTop + plotH);
+      ctx24h.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+      ctx24h.lineWidth = 1.5;
+      ctx24h.setLineDash([2, 3]);
+      ctx24h.stroke();
+      ctx24h.setLineDash([]);
+
+      ctx24h.beginPath();
+      ctx24h.arc(hPt.cx, hPt.py, 5, 0, 2 * Math.PI);
+      ctx24h.fillStyle = '#fbbf24';
+      ctx24h.fill();
+      ctx24h.strokeStyle = '#fff';
+      ctx24h.lineWidth = 1.5;
+      ctx24h.stroke();
+    }
+
+    // 6. X-Axis Labels
+    ctx24h.font = '10px var(--font-family)';
+    ctx24h.fillStyle = '#94a3b8';
+    ctx24h.textAlign = 'center';
+
+    let labelStep = 1;
+    if (barCount > 60) labelStep = Math.ceil(barCount / 6);
+    else if (barCount > 20) labelStep = Math.ceil(barCount / 7);
+    else if (barCount > 10) labelStep = 2;
+
+    for (let idx = 0; idx < barCount; idx += labelStep) {
+      const pt = coords[idx];
+      let lbl = pt.d.day_label || pt.d.date;
+      if (barCount > 14 && pt.d.date && pt.d.date.length >= 10) {
+        lbl = pt.d.date.substring(5);
+      }
+      ctx24h.fillText(lbl, pt.cx, h - 8);
+    }
+  }
+
+  function drawYearlyChart(months) {
+    if (!ctx24h || !months || months.length === 0) return;
+    cachedYearMonths = months;
+    const dims = setupHiDPI(canvas24h, ctx24h);
+    if (!dims) return;
+    const w = dims.width;
+    const h = dims.height;
+
+    const padLeft = 52;
+    const padRight = 45;
+    const padTop = 20;
+    const padBottom = 28;
+    const plotW = w - padLeft - padRight;
+    const plotH = h - padTop - padBottom;
+
+    ctx24h.clearRect(0, 0, w, h);
+
+    let maxKWh = 1.0;
+    let maxAvgWh = 100;
+    let totalAnnualWh = 0;
+    let peakMonth = months[0];
+
+    months.forEach(m => {
+      const wh = m.total_energy_wh || 0;
+      const kwh = m.total_energy_kwh || (wh / 1000.0);
+      const avg = m.daily_avg_wh || (m.days_counted ? Math.round(wh / m.days_counted) : Math.round(wh / 30));
+      totalAnnualWh += wh;
+      if (kwh > maxKWh) maxKWh = kwh;
+      if (avg > maxAvgWh) maxAvgWh = avg;
+      if (wh > (peakMonth.total_energy_wh || 0)) peakMonth = m;
+    });
+
+    maxKWh = Math.ceil(maxKWh * 1.15 * 10) / 10;
+    maxAvgWh = Math.ceil(maxAvgWh / 100) * 100;
+    cachedYearMetrics = { padLeft, padRight, padTop, padBottom, plotW, plotH, maxKWh, maxAvgWh, w, h, months };
+
+    const totalAnnualKWh = (totalAnnualWh / 1000.0).toFixed(1);
+    if (elPeak24h) {
+      elPeak24h.textContent = `Annual: ${totalAnnualKWh} kWh • Peak Month: ${peakMonth.month_label || peakMonth.month_key} (${(peakMonth.total_energy_wh/1000).toFixed(1)} kWh)`;
+    }
+
+    // 1. Grid Lines & Dual Y-Axes
+    const ySteps = 4;
+    for (let i = 0; i <= ySteps; i++) {
+      const yKWh = ((maxKWh / ySteps) * i).toFixed(1);
+      const yAvg = Math.round((maxAvgWh / ySteps) * i);
+      const yPos = padTop + plotH - (i / ySteps) * plotH;
+
+      ctx24h.beginPath();
+      ctx24h.moveTo(padLeft, yPos);
+      ctx24h.lineTo(w - padRight, yPos);
+      ctx24h.strokeStyle = 'rgba(255, 255, 255, 0.06)';
+      ctx24h.lineWidth = 1;
+      ctx24h.stroke();
+
+      // Left Y-Axis: kWh
+      ctx24h.font = '10px var(--font-mono)';
+      ctx24h.fillStyle = i === ySteps ? '#fbbf24' : '#64748b';
+      ctx24h.textAlign = 'right';
+      ctx24h.fillText(`${yKWh}k`, padLeft - 6, yPos + 3);
+
+      // Right Y-Axis: Daily Avg Wh
+      ctx24h.fillStyle = i === ySteps ? '#10b981' : '#059669';
+      ctx24h.textAlign = 'left';
+      ctx24h.fillText(`${yAvg}Wh/d`, w - padRight + 6, yPos + 3);
+    }
+
+    // Headers
+    ctx24h.font = 'bold 9px var(--font-mono)';
+    ctx24h.fillStyle = '#f59e0b';
+    ctx24h.textAlign = 'right';
+    ctx24h.fillText('MONTHLY (kWh)', padLeft - 6, padTop - 6);
+
+    ctx24h.fillStyle = '#10b981';
+    ctx24h.textAlign = 'left';
+    ctx24h.fillText('DAILY AVG', w - padRight + 6, padTop - 6);
+
+    // 2. Draw 12 Monthly Bars
+    const barCount = months.length;
+    const slotW = plotW / barCount;
+    const barW = Math.min(38, slotW * 0.70);
+
+    const coords = [];
+    months.forEach((m, idx) => {
+      const kwh = m.total_energy_kwh || ((m.total_energy_wh || 0) / 1000.0);
+      const avg = m.daily_avg_wh || (m.days_counted ? Math.round(m.total_energy_wh / m.days_counted) : Math.round(m.total_energy_wh / 30));
+      const cx = padLeft + (idx + 0.5) * slotW;
+      const barH = (kwh / maxKWh) * plotH;
+      const bx = cx - barW / 2;
+      const by = padTop + plotH - barH;
+      const avgY = padTop + plotH - (avg / maxAvgWh) * plotH;
+      coords.push({ cx, bx, by, barW, barH, avgY, m });
+
+      const isHovered = (activeHoverIdxYear === idx);
+      const barGrad = ctx24h.createLinearGradient(0, by, 0, padTop + plotH);
+      if (isHovered) {
+        barGrad.addColorStop(0, '#ffffff');
+        barGrad.addColorStop(1, 'rgba(245, 158, 11, 0.8)');
+      } else {
+        barGrad.addColorStop(0, '#f59e0b');
+        barGrad.addColorStop(1, 'rgba(245, 158, 11, 0.3)');
+      }
+
+      ctx24h.fillStyle = barGrad;
+      ctx24h.beginPath();
+      ctx24h.roundRect(bx, by, barW, barH, [4, 4, 0, 0]);
+      ctx24h.fill();
+
+      // Top label with kWh
+      if (barW >= 24 && kwh > 0) {
+        ctx24h.fillStyle = '#fbbf24';
+        ctx24h.font = '9px var(--font-mono)';
+        ctx24h.textAlign = 'center';
+        ctx24h.fillText(`${kwh.toFixed(1)}k`, cx, Math.max(padTop + 10, by - 5));
+      }
+
+      // X-Axis month label
+      ctx24h.font = '10px var(--font-family)';
+      ctx24h.fillStyle = isHovered ? '#f59e0b' : '#cbd5e1';
+      ctx24h.textAlign = 'center';
+      const label = m.month_label ? m.month_label.split(' ')[0] : (m.month_key ? m.month_key.substring(5) : '');
+      ctx24h.fillText(label, cx, h - 8);
+    });
+
+    // 3. Daily Average Line (Emerald)
+    ctx24h.beginPath();
+    coords.forEach((pt, idx) => {
+      if (idx === 0) ctx24h.moveTo(pt.cx, pt.avgY);
+      else ctx24h.lineTo(pt.cx, pt.avgY);
+    });
+    ctx24h.strokeStyle = '#10b981';
+    ctx24h.lineWidth = 2.2;
+    ctx24h.stroke();
+
+    coords.forEach(pt => {
+      ctx24h.beginPath();
+      ctx24h.arc(pt.cx, pt.avgY, 3.5, 0, 2 * Math.PI);
+      ctx24h.fillStyle = '#10b981';
+      ctx24h.fill();
+    });
+
+    // 4. Hover Crosshair
+    if (activeHoverIdxYear >= 0 && activeHoverIdxYear < coords.length) {
+      const hPt = coords[activeHoverIdxYear];
+      ctx24h.beginPath();
+      ctx24h.moveTo(hPt.cx, padTop);
+      ctx24h.lineTo(hPt.cx, padTop + plotH);
+      ctx24h.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+      ctx24h.lineWidth = 1.5;
+      ctx24h.setLineDash([2, 3]);
+      ctx24h.stroke();
+      ctx24h.setLineDash([]);
+    }
+  }
+
+  function handleMultiDayHover(clientX, clientY) {
+    if (!canvas24h || !cachedMultiDays || !cachedMultiMetrics || !tooltip24h) return;
+    const rect = canvas24h.getBoundingClientRect();
+    const xInCanvas = (clientX - rect.left) * (cachedMultiMetrics.w / rect.width);
+    const { padLeft, plotW, days } = cachedMultiMetrics;
+
+    const xRel = xInCanvas - padLeft;
+    if (xRel < 0 || xRel > plotW) {
+      handleMultiDayLeave();
+      return;
+    }
+
+    const slotW = plotW / days.length;
+    const idx = Math.min(days.length - 1, Math.max(0, Math.floor(xRel / slotW)));
+    activeHoverIdxMulti = idx;
+    drawMultiDayChart(days, currentTimespan);
+
+    const d = days[idx];
+    const wh = d.energy_wh ?? d.total_energy_wh ?? 0;
+    const kwh = (wh / 1000.0).toFixed(2);
+    const peakW = d.peak_solar_w || 0;
+    const soc = d.avg_battery_soc || 100;
+    const maxV = d.max_pv_v ? d.max_pv_v.toFixed(1) : null;
+
+    tooltip24h.innerHTML = `
+      <div style="font-weight: 700; color: #f8fafc; font-size: 12px; margin-bottom: 4px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 3px;">
+        📅 ${d.day_label || d.date} <span style="font-size: 10px; color: #94a3b8; font-weight: normal;">(${d.date || ''})</span>
+      </div>
+      <div style="display: flex; justify-content: space-between; gap: 12px; font-size: 11px;">
+        <span style="color: #38bdf8;">⚡ Daily Yield:</span>
+        <span style="font-weight: 700; color: #38bdf8;">${wh.toLocaleString()} Wh (${kwh} kWh)</span>
+      </div>
+      <div style="display: flex; justify-content: space-between; gap: 12px; font-size: 11px;">
+        <span style="color: #fbbf24;">☀️ Peak Solar:</span>
+        <span style="font-weight: 700; color: #fbbf24;">${peakW} W</span>
+      </div>
+      ${maxV ? `<div style="display: flex; justify-content: space-between; gap: 12px; font-size: 11px;"><span style="color: #38bdf8;">🔋 Max Solar Volts:</span><span style="font-weight: 700; color: #38bdf8;">${maxV} V</span></div>` : ''}
+      <div style="display: flex; justify-content: space-between; gap: 12px; font-size: 11px;">
+        <span style="color: #34d399;">🔋 Avg Battery SOC:</span>
+        <span style="font-weight: 700; color: #34d399;">${soc}%</span>
+      </div>
+    `;
+
+    tooltip24h.style.display = 'block';
+    const tipX = clientX - rect.left;
+    const tipY = clientY - rect.top;
+    if (tipX > rect.width * 0.6) {
+      tooltip24h.style.left = `${tipX - 195}px`;
+    } else {
+      tooltip24h.style.left = `${tipX + 15}px`;
+    }
+    tooltip24h.style.top = `${Math.max(10, tipY - 50)}px`;
+  }
+
+  function handleMultiDayLeave() {
+    if (tooltip24h) tooltip24h.style.display = 'none';
+    if (activeHoverIdxMulti !== -1) {
+      activeHoverIdxMulti = -1;
+      if (cachedMultiDays) drawMultiDayChart(cachedMultiDays, currentTimespan);
+    }
+  }
+
+  function handleYearlyHover(clientX, clientY) {
+    if (!canvas24h || !cachedYearMonths || !cachedYearMetrics || !tooltip24h) return;
+    const rect = canvas24h.getBoundingClientRect();
+    const xInCanvas = (clientX - rect.left) * (cachedYearMetrics.w / rect.width);
+    const { padLeft, plotW, months } = cachedYearMetrics;
+
+    const xRel = xInCanvas - padLeft;
+    if (xRel < 0 || xRel > plotW) {
+      handleYearlyLeave();
+      return;
+    }
+
+    const slotW = plotW / months.length;
+    const idx = Math.min(months.length - 1, Math.max(0, Math.floor(xRel / slotW)));
+    activeHoverIdxYear = idx;
+    drawYearlyChart(months);
+
+    const m = months[idx];
+    const kwh = m.total_energy_kwh || ((m.total_energy_wh || 0) / 1000.0);
+    const avg = m.daily_avg_wh || (m.days_counted ? Math.round(m.total_energy_wh / m.days_counted) : Math.round(m.total_energy_wh / 30));
+
+    tooltip24h.innerHTML = `
+      <div style="font-weight: 700; color: #f8fafc; font-size: 12px; margin-bottom: 4px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 3px;">
+        📅 ${m.month_label || m.month_key}
+      </div>
+      <div style="display: flex; justify-content: space-between; gap: 12px; font-size: 11px;">
+        <span style="color: #fbbf24;">⚡ Total Generation:</span>
+        <span style="font-weight: 700; color: #fbbf24;">${kwh.toFixed(1)} kWh</span>
+      </div>
+      <div style="display: flex; justify-content: space-between; gap: 12px; font-size: 11px;">
+        <span style="color: #34d399;">☀️ Daily Average:</span>
+        <span style="font-weight: 700; color: #34d399;">${avg} Wh/day</span>
+      </div>
+      <div style="display: flex; justify-content: space-between; gap: 12px; font-size: 11px;">
+        <span style="color: #38bdf8;">⚡ Peak Solar Power:</span>
+        <span style="font-weight: 700; color: #38bdf8;">${m.peak_watts || 0} W</span>
+      </div>
+    `;
+
+    tooltip24h.style.display = 'block';
+    const tipX = clientX - rect.left;
+    const tipY = clientY - rect.top;
+    if (tipX > rect.width * 0.6) {
+      tooltip24h.style.left = `${tipX - 195}px`;
+    } else {
+      tooltip24h.style.left = `${tipX + 15}px`;
+    }
+    tooltip24h.style.top = `${Math.max(10, tipY - 50)}px`;
+  }
+
+  function handleYearlyLeave() {
+    if (tooltip24h) tooltip24h.style.display = 'none';
+    if (activeHoverIdxYear !== -1) {
+      activeHoverIdxYear = -1;
+      if (cachedYearMonths) drawYearlyChart(cachedYearMonths);
+    }
+  }
+
+  function handleUnifiedHistoryHover(clientX, clientY) {
+    if (currentTimespan === 'today') {
+      handle24hHover(clientX, clientY);
+    } else if (currentTimespan === 'year') {
+      handleYearlyHover(clientX, clientY);
+    } else {
+      handleMultiDayHover(clientX, clientY);
+    }
+  }
+
+  function handleUnifiedHistoryLeave() {
+    if (currentTimespan === 'today') {
+      handle24hLeave();
+    } else if (currentTimespan === 'year') {
+      handleYearlyLeave();
+    } else {
+      handleMultiDayLeave();
+    }
+  }
+
+  function renderHistoryTimespanChart() {
+    if (!historyData) return;
+
+    if (currentTimespan === 'today') {
+      if (elHistoryChartTitle) elHistoryChartTitle.textContent = 'SOLAR POWER — TODAY (24H)';
+      if (elLegItemVolts) elLegItemVolts.style.display = 'flex';
+      if (elLegItemPower) {
+        elLegItemPower.style.display = 'flex';
+        elLegItemPower.innerHTML = '<span class="legend-dot solar-dot"></span> Solar Power (W)';
+      }
+      if (elLegItemBatt) {
+        elLegItemBatt.style.display = 'flex';
+        elLegItemBatt.innerHTML = '<span class="legend-dot batt-dot"></span> Battery Power (W)';
+      }
+      if (elLegItemSoc) elLegItemSoc.style.display = 'flex';
+      if (elWindow24hLabel) elWindow24hLabel.textContent = '24-Hour Solar & Battery Flow (15m buckets)';
+
+      if (historyData.points_24h) {
+        draw24hChart(historyData.points_24h);
+      }
+    } else if (currentTimespan === 'week') {
+      if (elHistoryChartTitle) elHistoryChartTitle.textContent = 'SOLAR HARVEST — PAST 7 DAYS';
+      if (elLegItemVolts) elLegItemVolts.style.display = 'none';
+      if (elLegItemPower) {
+        elLegItemPower.style.display = 'flex';
+        elLegItemPower.innerHTML = '<span class="legend-dot bar-dot"></span> Daily Energy Yield (Wh)';
+      }
+      if (elLegItemBatt) {
+        elLegItemBatt.style.display = 'flex';
+        elLegItemBatt.innerHTML = '<span class="legend-dot peak-dot"></span> Peak Solar Power (W)';
+      }
+      if (elLegItemSoc) {
+        elLegItemSoc.style.display = 'flex';
+        elLegItemSoc.innerHTML = '<span class="legend-dot batt-dot"></span> 3-Day Moving Avg';
+      }
+      if (elWindow24hLabel) elWindow24hLabel.textContent = 'Past 7 Calendar Days Daily Yield';
+
+      const days = historyData.days_7d || (historyData.days_30d ? historyData.days_30d.slice(-7) : []);
+      drawMultiDayChart(days, 'week');
+    } else if (currentTimespan === 'month') {
+      if (elHistoryChartTitle) elHistoryChartTitle.textContent = 'SOLAR HARVEST — PAST 30 DAYS';
+      if (elLegItemVolts) elLegItemVolts.style.display = 'none';
+      if (elLegItemPower) {
+        elLegItemPower.style.display = 'flex';
+        elLegItemPower.innerHTML = '<span class="legend-dot bar-dot"></span> Daily Energy Yield (Wh)';
+      }
+      if (elLegItemBatt) {
+        elLegItemBatt.style.display = 'flex';
+        elLegItemBatt.innerHTML = '<span class="legend-dot peak-dot"></span> Peak Solar Power (W)';
+      }
+      if (elLegItemSoc) {
+        elLegItemSoc.style.display = 'flex';
+        elLegItemSoc.innerHTML = '<span class="legend-dot batt-dot"></span> 5-Day Moving Avg';
+      }
+      if (elWindow24hLabel) elWindow24hLabel.textContent = 'Past 30 Calendar Days Solar Harvest';
+
+      const days = historyData.days_30d || historyData.days_7d || [];
+      drawMultiDayChart(days, 'month');
+    } else if (currentTimespan === 'quarter') {
+      if (elHistoryChartTitle) elHistoryChartTitle.textContent = 'SOLAR HARVEST — PAST 90 DAYS (QUARTER)';
+      if (elLegItemVolts) elLegItemVolts.style.display = 'none';
+      if (elLegItemPower) {
+        elLegItemPower.style.display = 'flex';
+        elLegItemPower.innerHTML = '<span class="legend-dot bar-dot"></span> Daily Solar Harvest (Wh)';
+      }
+      if (elLegItemBatt) {
+        elLegItemBatt.style.display = 'flex';
+        elLegItemBatt.innerHTML = '<span class="legend-dot peak-dot"></span> Peak Solar Power (W)';
+      }
+      if (elLegItemSoc) {
+        elLegItemSoc.style.display = 'flex';
+        elLegItemSoc.innerHTML = '<span class="legend-dot batt-dot"></span> 7-Day Moving Avg';
+      }
+      if (elWindow24hLabel) elWindow24hLabel.textContent = 'Past 90 Calendar Days (3 Months)';
+
+      const days = historyData.days_90d || historyData.days_30d || [];
+      drawMultiDayChart(days, 'quarter');
+    } else if (currentTimespan === 'halfyear') {
+      if (elHistoryChartTitle) elHistoryChartTitle.textContent = 'SOLAR HARVEST — PAST 6 MONTHS (HALF YEAR)';
+      if (elLegItemVolts) elLegItemVolts.style.display = 'none';
+      if (elLegItemPower) {
+        elLegItemPower.style.display = 'flex';
+        elLegItemPower.innerHTML = '<span class="legend-dot bar-dot"></span> Daily Solar Harvest';
+      }
+      if (elLegItemBatt) {
+        elLegItemBatt.style.display = 'flex';
+        elLegItemBatt.innerHTML = '<span class="legend-dot peak-dot"></span> Peak Solar Power (W)';
+      }
+      if (elLegItemSoc) {
+        elLegItemSoc.style.display = 'flex';
+        elLegItemSoc.innerHTML = '<span class="legend-dot batt-dot"></span> 7-Day Moving Avg';
+      }
+      if (elWindow24hLabel) elWindow24hLabel.textContent = 'Past 180 Calendar Days (6 Months)';
+
+      const days = historyData.days_180d || historyData.days_90d || [];
+      drawMultiDayChart(days, 'halfyear');
+    } else if (currentTimespan === 'year') {
+      if (elHistoryChartTitle) elHistoryChartTitle.textContent = 'SOLAR HARVEST — PAST 12 MONTHS (WHOLE YEAR)';
+      if (elLegItemVolts) elLegItemVolts.style.display = 'none';
+      if (elLegItemPower) {
+        elLegItemPower.style.display = 'flex';
+        elLegItemPower.innerHTML = '<span class="legend-dot solar-dot"></span> Monthly Production (kWh)';
+      }
+      if (elLegItemBatt) {
+        elLegItemBatt.style.display = 'flex';
+        elLegItemBatt.innerHTML = '<span class="legend-dot batt-dot"></span> Daily Average Yield';
+      }
+      if (elLegItemSoc) elLegItemSoc.style.display = 'none';
+      if (elWindow24hLabel) elWindow24hLabel.textContent = 'Past 12 Calendar Months Production';
+
+      const months = historyData.months_12m || [];
+      drawYearlyChart(months);
+    }
+  }
+
+  function setTimespan(span) {
+    currentTimespan = span;
+    try {
+      localStorage.setItem('renology_timespan', span);
+    } catch (_) {}
+    document.querySelectorAll('.span-btn').forEach(btn => {
+      const isActive = (btn.dataset.span === span);
+      btn.classList.toggle('active', isActive);
+      btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    });
+    renderHistoryTimespanChart();
+  }
+
+  // Setup Timespan Tab Click & Touch Handlers
+  document.querySelectorAll('.span-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.preventDefault();
+      setTimespan(btn.dataset.span);
+    });
+  });
+
+  // Apply initially saved timespan tab state
+  if (currentTimespan !== 'today') {
+    document.querySelectorAll('.span-btn').forEach(btn => {
+      const isActive = (btn.dataset.span === currentTimespan);
+      btn.classList.toggle('active', isActive);
+      btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    });
+  }
+
   if (canvas24h) {
-    canvas24h.addEventListener('mousemove', e => handle24hHover(e.clientX, e.clientY));
-    canvas24h.addEventListener('mouseleave', handle24hLeave);
+    canvas24h.addEventListener('mousemove', e => handleUnifiedHistoryHover(e.clientX, e.clientY));
+    canvas24h.addEventListener('mouseleave', handleUnifiedHistoryLeave);
     canvas24h.addEventListener('touchmove', e => {
       if (e.touches.length > 0) {
-        handle24hHover(e.touches[0].clientX, e.touches[0].clientY);
+        handleUnifiedHistoryHover(e.touches[0].clientX, e.touches[0].clientY);
       }
     }, { passive: true });
-    canvas24h.addEventListener('touchend', handle24hLeave);
+    canvas24h.addEventListener('touchend', handleUnifiedHistoryLeave);
   }
+
 
   // =========================================================================
   // 7-DAY SOLAR PRODUCTION BAR CHART
@@ -1149,6 +1851,7 @@
 
       // Update Speedometer & Solar PV Metrics
       targetPvVolts = t.pv_voltage_v || 0;
+      triggerNeedleAnimation();
       if (elSolarPower) elSolarPower.innerHTML = `${t.pv_power_w || 0}<span class="unit">W</span>`;
       if (elPvV) elPvV.innerHTML = `${(t.pv_voltage_v || 0).toFixed(1)}<span class="unit">V</span>`;
       if (elPvA) elPvA.innerHTML = `${(t.pv_current_a || 0).toFixed(2)}<span class="unit">A</span>`;
@@ -1213,9 +1916,7 @@
       if (!resp.ok) return;
       historyData = await resp.json();
 
-      if (historyData.points_24h) {
-        draw24hChart(historyData.points_24h);
-      }
+      renderHistoryTimespanChart();
       if (historyData.days_7d) {
         draw7dChart(historyData.days_7d);
       }
@@ -1228,7 +1929,7 @@
     drawFuelGauge();
     drawSpeedometer();
     if (historyData) {
-      if (historyData.points_24h) draw24hChart(historyData.points_24h);
+      renderHistoryTimespanChart();
       if (historyData.days_7d) draw7dChart(historyData.days_7d);
     }
   }

@@ -32,6 +32,56 @@ def log(msg):
     print(f"[{ts}] [Troubleshooter] {msg}")
 
 
+def repair_weather_station_push(station_ip="192.168.0.176", target_ip="192.168.0.163", port=8088, interval=16):
+    """
+    Autonomously connects to the EasyWeather console via TCP port 45000 and re-programs
+    CMD_WRITE_CUSTOMIZED (0x2B) and CMD_WRITE_USR_PATH (0x52) so telemetry streams directly
+    to the local Surface Go 2 ingestion server.
+    """
+    import socket
+    # 1. Build CMD_WRITE_CUSTOMIZED (0x2B) packet
+    cmd = 0x2B
+    payload = bytearray()
+    payload.append(0)  # station_id len
+    payload.append(0)  # password len
+    ip_bytes = target_ip.encode("ascii")
+    payload.append(len(ip_bytes))
+    payload.extend(ip_bytes)
+    payload.extend(port.to_bytes(2, "big"))
+    payload.extend(interval.to_bytes(2, "big"))
+    payload.append(0)  # Ecowitt protocol
+    payload.append(1)  # Enabled
+    size = len(payload) + 3
+    checksum = (cmd + size + sum(payload)) & 0xFF
+    pkt_custom = b"\xff\xff" + bytes([cmd, size]) + payload + bytes([checksum])
+
+    # 2. Build CMD_WRITE_USR_PATH (0x52) packet
+    path = b"/data/report/"
+    cmd_p = 0x52
+    payload_p = bytearray([len(path)]) + path
+    size_p = len(payload_p) + 3
+    checksum_p = (cmd_p + size_p + sum(payload_p)) & 0xFF
+    pkt_path = b"\xff\xff" + bytes([cmd_p, size_p]) + payload_p + bytes([checksum_p])
+
+    results = []
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(4.0)
+        s.connect((station_ip, 45000))
+        s.sendall(pkt_custom)
+        res1 = s.recv(1024)
+        if res1 and len(res1) >= 4 and res1[2] == 0x2B:
+            results.append(f"Customized server set to {target_ip}:{port}")
+        s.sendall(pkt_path)
+        res2 = s.recv(1024)
+        if res2 and len(res2) >= 4 and res2[2] == 0x52:
+            results.append("Upload path set to /data/report/")
+        s.close()
+        return True, ", ".join(results)
+    except Exception as e:
+        return False, f"TCP 45000 command failed: {e}"
+
+
 def attempt_remediation(audit):
     """
     Executes targeted, safe self-healing actions based on identified anomalies.
@@ -42,25 +92,25 @@ def attempt_remediation(audit):
     p_wea = audit["pillars"]["weather"]
     p_kio = audit["pillars"]["kiosk"]
 
-    # 1. Weather Server Remediation (Service down or API unhealthy)
-    if not p_wea["running"] or not p_wea["api_healthy"]:
-        log("Weather server process dead or API unhealthy. Restarting weather-server.service...")
+    # 1. Weather Server & Station Push Remediation
+    weather_needs_remediation = (
+        not p_wea["running"] or
+        not p_wea["api_healthy"] or
+        p_wea.get("station_status") != "online" or
+        (p_wea.get("age_seconds") is not None and p_wea["age_seconds"] > 900.0)
+    )
+    if weather_needs_remediation:
+        log("Weather station offline, stale, or server unhealthy. Executing autonomous self-healing...")
+        # A. Restart local ingestion service
         res = subprocess.run(["systemctl", "--user", "restart", "weather-server.service"], capture_output=True, text=True)
         actions_taken.append(f"Restarted weather-server.service (exit code: {res.returncode})")
-        time.sleep(3)
-    # 1b. Weather Data Stale (>2 hours old) but service was running
-    elif p_wea.get("age_seconds") and p_wea["age_seconds"] > 7200.0:
-        age_hours = round(p_wea["age_seconds"] / 3600.0, 1)
-        log(f"Weather observations are stale ({age_hours}h old). Restarting ingestion service & verifying port 8088...")
-        res = subprocess.run(["systemctl", "--user", "restart", "weather-server.service"], capture_output=True, text=True)
-        # Verify port 8088 listening
-        check_port = subprocess.run(["ss", "-tulpn"], capture_output=True, text=True)
-        port_ok = ":8088" in check_port.stdout
-        port_status = "active & listening on 0.0.0.0:8088" if port_ok else "port check failed"
-        actions_taken.append(
-            f"Restarted weather-server.service ({port_status}). "
-            f"Note: Local ingestion server is ready; external EasyWeather console has not transmitted since {p_wea.get('updated_at', 'unknown')}."
-        )
+        time.sleep(2)
+        # B. Reprogram console over TCP port 45000
+        ok, msg = repair_weather_station_push()
+        if ok:
+            actions_taken.append(f"Autonomously re-programmed EasyWeather console via TCP port 45000 ({msg})")
+        else:
+            actions_taken.append(f"EasyWeather console TCP self-healing attempted: {msg}")
         time.sleep(3)
 
     # 2. Renology Daemon / Poller Remediation
@@ -281,23 +331,25 @@ Live Dashboard: https://renology-952659886764.us-central1.run.app
 """
 
     html_body = f"""<!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark">
+<meta name="supported-color-schemes" content="dark">
 <title>Renology Sentinel Alert</title>
 </head>
-<body style="margin: 0; padding: 24px 12px; background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-text-size-adjust: 100%; color: #1e293b;">
-<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color: #f1f5f9;">
+<body style="margin: 0; padding: 24px 12px; background-color: #090d16; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-text-size-adjust: 100%; color: #f8fafc;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color: #090d16;">
   <tr>
     <td align="center">
-      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width: 620px; background-color: #ffffff; border: 1px solid #cbd5e1; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.06);">
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width: 620px; background-color: #111827; border: 1px solid #374151; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,0.5);">
 
         <!-- Header Banner -->
         <tr>
-          <td style="background-color: #b91c1c; padding: 20px 24px; color: #ffffff;">
+          <td style="background-color: #7f1d1d; padding: 22px 26px; border-bottom: 2px solid #ef4444;">
             <div style="font-size: 20px; font-weight: 700; color: #ffffff; margin-bottom: 6px;">🚨 Renology & Weather Sentinel Alert</div>
-            <div style="font-size: 13px; color: #fecaca; font-weight: 500;">{ts_str} • Surface Go 2 Appliance • Status: {audit['overall_status']}</div>
+            <div style="font-size: 13px; color: #fca5a5; font-weight: 500;">{ts_str} • Surface Go 2 Appliance • Status: {audit['overall_status']}</div>
           </td>
         </tr>
 
@@ -307,32 +359,32 @@ Live Dashboard: https://renology-952659886764.us-central1.run.app
 
             <!-- Section 1: Detected Issues -->
             <div style="margin-bottom: 22px;">
-              <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: #b91c1c; margin-bottom: 8px;">Detected Issues</div>
-              <div style="background-color: #fef2f2; border: 1px solid #fecaca; border-left: 5px solid #ef4444; border-radius: 8px; padding: 14px 16px; color: #991b1b; font-size: 14px; line-height: 1.5;">
+              <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: #f87171; margin-bottom: 8px;">Detected Issues</div>
+              <div style="background-color: #450a0a; border: 1px solid #991b1b; border-left: 5px solid #ef4444; border-radius: 8px; padding: 14px 16px; color: #fee2e2; font-size: 14px; line-height: 1.5;">
                 {issues_html}
               </div>
             </div>
 
             <!-- Section 2: Autonomous Remediation Attempted -->
             <div style="margin-bottom: 22px;">
-              <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: #15803d; margin-bottom: 8px;">Autonomous Remediation Attempted</div>
-              <div style="background-color: #f0fdf4; border: 1px solid #bbf7d0; border-left: 5px solid #10b981; border-radius: 8px; padding: 14px 16px; color: #166534; font-size: 14px; line-height: 1.5;">
+              <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: #34d399; margin-bottom: 8px;">Autonomous Remediation Attempted</div>
+              <div style="background-color: #064e3b; border: 1px solid #047857; border-left: 5px solid #10b981; border-radius: 8px; padding: 14px 16px; color: #d1fae5; font-size: 14px; line-height: 1.5;">
                 {actions_html}
               </div>
             </div>
 
             <!-- Section 3: AI Agent Diagnostic Analysis -->
             <div style="margin-bottom: 22px;">
-              <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: #4338ca; margin-bottom: 8px;">AI Agent Diagnostic Analysis</div>
-              <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-left: 5px solid #6366f1; border-radius: 8px; padding: 14px 16px; color: #1e293b; font-family: ui-monospace, Menlo, Monaco, 'Cascadia Mono', 'Courier New', monospace; font-size: 13px; line-height: 1.6;">
+              <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: #818cf8; margin-bottom: 8px;">AI Agent Diagnostic Analysis</div>
+              <div style="background-color: #1e1b4b; border: 1px solid #4338ca; border-left: 5px solid #6366f1; border-radius: 8px; padding: 14px 16px; color: #e0e7ff; font-family: ui-monospace, Menlo, Monaco, 'Cascadia Mono', 'Courier New', monospace; font-size: 13px; line-height: 1.6;">
                 {agy_html}
               </div>
             </div>
 
             <!-- Section 4: Targeted On-Site Checklist -->
             <div style="margin-bottom: 12px;">
-              <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: #b45309; margin-bottom: 8px;">Recommended Targeted On-Site Checklist</div>
-              <div style="background-color: #fffbeb; border: 1px solid #fde68a; border-left: 5px solid #f59e0b; border-radius: 8px; padding: 14px 16px; color: #78350f; font-size: 14px; line-height: 1.6;">
+              <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: #fbbf24; margin-bottom: 8px;">Recommended Targeted On-Site Checklist</div>
+              <div style="background-color: #451a03; border: 1px solid #b45309; border-left: 5px solid #f59e0b; border-radius: 8px; padding: 14px 16px; color: #fef3c7; font-size: 14px; line-height: 1.6;">
                 {checklist_html}
               </div>
             </div>
@@ -342,9 +394,9 @@ Live Dashboard: https://renology-952659886764.us-central1.run.app
 
         <!-- Footer -->
         <tr>
-          <td style="background-color: #f8fafc; border-top: 1px solid #e2e8f0; padding: 16px 24px; text-align: center; font-size: 12px; color: #64748b;">
+          <td style="background-color: #0b0f19; border-top: 1px solid #374151; padding: 16px 24px; text-align: center; font-size: 12px; color: #94a3b8;">
             Renology Autonomous SRE • Automated Dispatch to {recipient}<br>
-            <a href="https://renology-952659886764.us-central1.run.app" style="color: #2563eb; text-decoration: underline; font-weight: 500;">Open Live Cloud Run Solar Dashboard</a>
+            <a href="https://renology-952659886764.us-central1.run.app" style="color: #38bdf8; text-decoration: underline; font-weight: 500;">Open Live Cloud Run Solar Dashboard</a>
           </td>
         </tr>
 
