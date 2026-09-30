@@ -60,6 +60,21 @@ func TestGetHistoryAndLatest(t *testing.T) {
 	if len(hist.Points24h) != 96 {
 		t.Errorf("Expected 96 24h points, got %d", len(hist.Points24h))
 	}
+	if len(hist.Points7d) != 672 {
+		t.Errorf("Expected 672 7d points (15m buckets), got %d", len(hist.Points7d))
+	}
+	if len(hist.Points30d) != 240 {
+		t.Errorf("Expected 240 30d points (3h buckets), got %d", len(hist.Points30d))
+	}
+	if len(hist.Points90d) != 360 {
+		t.Errorf("Expected 360 90d points (6h buckets), got %d", len(hist.Points90d))
+	}
+	if len(hist.Points180d) != 360 {
+		t.Errorf("Expected 360 180d points (12h buckets), got %d", len(hist.Points180d))
+	}
+	if len(hist.Points365d) != 365 {
+		t.Errorf("Expected 365 365d points (24h buckets), got %d", len(hist.Points365d))
+	}
 
 	if len(hist.Days7d) != 7 {
 		t.Errorf("Expected 7 days summary, got %d", len(hist.Days7d))

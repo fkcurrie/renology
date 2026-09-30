@@ -47,13 +47,18 @@ type MonthlySummaryRecord struct {
 
 // HistoryResponse encapsulates both 24-hour and multi-timespan historical telemetry data.
 type HistoryResponse struct {
-	Points24h []HistoryPoint24h      `json:"points_24h"`
-	Days7d    []DailySummary7d       `json:"days_7d"`
-	Days30d   []DailySummaryRecord   `json:"days_30d"`
-	Days90d   []DailySummaryRecord   `json:"days_90d"`
-	Days180d  []DailySummaryRecord   `json:"days_180d"`
-	Days365d  []DailySummaryRecord   `json:"days_365d"`
-	Months12m []MonthlySummaryRecord `json:"months_12m"`
+	Points24h  []HistoryPoint24h      `json:"points_24h"`
+	Points7d   []HistoryPoint24h      `json:"points_7d"`
+	Points30d  []HistoryPoint24h      `json:"points_30d"`
+	Points90d  []HistoryPoint24h      `json:"points_90d"`
+	Points180d []HistoryPoint24h      `json:"points_180d"`
+	Points365d []HistoryPoint24h      `json:"points_365d"`
+	Days7d     []DailySummary7d       `json:"days_7d"`
+	Days30d    []DailySummaryRecord   `json:"days_30d"`
+	Days90d    []DailySummaryRecord   `json:"days_90d"`
+	Days180d   []DailySummaryRecord   `json:"days_180d"`
+	Days365d   []DailySummaryRecord   `json:"days_365d"`
+	Months12m  []MonthlySummaryRecord `json:"months_12m"`
 }
 
 // RecentMinutePoint represents an aggregated 1-minute point in a recent telemetry report.

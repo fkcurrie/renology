@@ -36,10 +36,15 @@ func (s *Storage) GetHistory(referenceTime time.Time) (*models.HistoryResponse, 
 		referenceTime = time.Now()
 	}
 
+	// 0. Return cached history if fresh within 10 seconds
+	if s.cachedHistory != nil && referenceTime.Sub(s.cachedHistoryTime) < 10*time.Second && referenceTime.Sub(s.cachedHistoryTime) >= 0 {
+		return s.cachedHistory, nil
+	}
+
 	var records []models.Telemetry
-	// 1. Try querying indexed SQLite database for 24h detailed points
+	// 1. Try querying indexed SQLite database for past 8 days to cover 24h & 7d (15m buckets)
 	if s.db != nil {
-		startWindow := referenceTime.Add(-48 * time.Hour)
+		startWindow := referenceTime.Add(-8 * 24 * time.Hour)
 		endWindow := referenceTime.Add(1 * time.Hour)
 		if sqlRecords, err := s.queryTelemetryRange(startWindow, endWindow); err == nil && len(sqlRecords) > 0 {
 			records = sqlRecords
@@ -86,10 +91,50 @@ func (s *Storage) GetHistory(referenceTime time.Time) (*models.HistoryResponse, 
 		}
 	}
 
-	// 4. Build 24-Hour Downsampled Series (15-minute buckets = 96 points)
+	// 4. Build Continuous Time-Series Series with Dynamic Bucket Averages
+	// Today (24h): 15-minute buckets (96 points)
 	points24h := s.build24hSeries(records, referenceTime)
 
-	// 5. Build Multi-Timespan Series
+	// Week (7d): 15-minute buckets (672 points)
+	points7d := s.build7dSeriesPoints(records, referenceTime)
+
+	// Month (30d): 3-hour buckets (240 points)
+	start30d := referenceTime.Add(-30 * 24 * time.Hour)
+	var points30d []models.HistoryPoint24h
+	if s.db != nil {
+		points30d = s.buildBucketedSeriesFromDB(start30d, referenceTime, 3*time.Hour, "Jan 02 15:04")
+	} else {
+		points30d = buildTimeSeries(records, start30d, referenceTime, 3*time.Hour, "Jan 02 15:04")
+	}
+
+	// Quarter (90d): 6-hour buckets (360 points)
+	start90d := referenceTime.Add(-90 * 24 * time.Hour)
+	var points90d []models.HistoryPoint24h
+	if s.db != nil {
+		points90d = s.buildBucketedSeriesFromDB(start90d, referenceTime, 6*time.Hour, "Jan 02 15:04")
+	} else {
+		points90d = buildTimeSeries(records, start90d, referenceTime, 6*time.Hour, "Jan 02 15:04")
+	}
+
+	// Half Year (180d): 12-hour buckets (360 points)
+	start180d := referenceTime.Add(-180 * 24 * time.Hour)
+	var points180d []models.HistoryPoint24h
+	if s.db != nil {
+		points180d = s.buildBucketedSeriesFromDB(start180d, referenceTime, 12*time.Hour, "Jan 02 15:04")
+	} else {
+		points180d = buildTimeSeries(records, start180d, referenceTime, 12*time.Hour, "Jan 02 15:04")
+	}
+
+	// Whole Year (365d): 24-hour buckets (365 points)
+	start365d := referenceTime.Add(-365 * 24 * time.Hour)
+	var points365d []models.HistoryPoint24h
+	if s.db != nil {
+		points365d = s.buildBucketedSeriesFromDB(start365d, referenceTime, 24*time.Hour, "Jan 02")
+	} else {
+		points365d = buildTimeSeries(records, start365d, referenceTime, 24*time.Hour, "Jan 02")
+	}
+
+	// 5. Build Multi-Timespan Daily Summaries (for Card 5 & backwards-compat)
 	days7dRecords := s.buildNDaySeries(dailyMap, referenceTime, 7)
 	days30d := s.buildNDaySeries(dailyMap, referenceTime, 30)
 	days90d := s.buildNDaySeries(dailyMap, referenceTime, 90)
@@ -110,15 +155,24 @@ func (s *Storage) GetHistory(referenceTime time.Time) (*models.HistoryResponse, 
 		}
 	}
 
-	return &models.HistoryResponse{
-		Points24h: points24h,
-		Days7d:    days7d,
-		Days30d:   days30d,
-		Days90d:   days90d,
-		Days180d:  days180d,
-		Days365d:  days365d,
-		Months12m: months12m,
-	}, nil
+	resp := &models.HistoryResponse{
+		Points24h:  points24h,
+		Points7d:   points7d,
+		Points30d:  points30d,
+		Points90d:  points90d,
+		Points180d: points180d,
+		Points365d: points365d,
+		Days7d:     days7d,
+		Days30d:    days30d,
+		Days90d:    days90d,
+		Days180d:   days180d,
+		Days365d:   days365d,
+		Months12m:  months12m,
+	}
+
+	s.cachedHistory = resp
+	s.cachedHistoryTime = referenceTime
+	return resp, nil
 }
 
 // readAllTelemetryRecords reads all valid telemetry records from the JSONL log file.
@@ -148,12 +202,16 @@ func (s *Storage) readAllTelemetryRecords() []models.Telemetry {
 	return records
 }
 
-// build24hSeries generates a 24-hour history curve in 15-minute intervals.
-func (s *Storage) build24hSeries(records []models.Telemetry, now time.Time) []models.HistoryPoint24h {
-	const bucketDuration = 15 * time.Minute
-	const numBuckets = 96 // 24 hours / 15 minutes
+// buildTimeSeries generates a downsampled history curve for a given duration and bucket interval from telemetry records.
+func buildTimeSeries(records []models.Telemetry, startWindow time.Time, now time.Time, bucketDuration time.Duration, timeFormat string) []models.HistoryPoint24h {
+	numBuckets := int(now.Sub(startWindow) / bucketDuration)
+	if numBuckets <= 0 {
+		return nil
+	}
+	if numBuckets > 2000 {
+		numBuckets = 2000
+	}
 
-	startWindow := now.Add(-24 * time.Hour)
 	points := make([]models.HistoryPoint24h, 0, numBuckets)
 
 	type bucketData struct {
@@ -167,7 +225,6 @@ func (s *Storage) build24hSeries(records []models.Telemetry, now time.Time) []mo
 
 	buckets := make(map[int]*bucketData)
 
-	// Group existing records into bucket index [0..95]
 	for _, r := range records {
 		if r.Timestamp.Before(startWindow) || r.Timestamp.After(now) {
 			continue
@@ -198,10 +255,9 @@ func (s *Storage) build24hSeries(records []models.Telemetry, now time.Time) []mo
 		b.sumBattVolt += r.BatteryVoltage
 	}
 
-	// Generate the 96 buckets
 	for i := 0; i < numBuckets; i++ {
 		tBucket := startWindow.Add(time.Duration(i) * bucketDuration)
-		timeLabel := tBucket.Format("15:04")
+		timeLabel := tBucket.Format(timeFormat)
 
 		if b, ok := buckets[i]; ok && b.count > 0 {
 			points = append(points, models.HistoryPoint24h{
@@ -227,6 +283,62 @@ func (s *Storage) build24hSeries(records []models.Telemetry, now time.Time) []mo
 		}
 	}
 
+	return points
+}
+
+// build24hSeries generates a 24-hour history curve in 15-minute intervals (96 points).
+func (s *Storage) build24hSeries(records []models.Telemetry, now time.Time) []models.HistoryPoint24h {
+	startWindow := now.Add(-24 * time.Hour)
+	return buildTimeSeries(records, startWindow, now, 15*time.Minute, "15:04")
+}
+
+// build7dSeriesPoints generates a 7-day history curve in 15-minute intervals (672 points).
+func (s *Storage) build7dSeriesPoints(records []models.Telemetry, now time.Time) []models.HistoryPoint24h {
+	startWindow := now.Add(-7 * 24 * time.Hour)
+	return buildTimeSeries(records, startWindow, now, 15*time.Minute, "Mon 15:04")
+}
+
+// buildBucketedSeriesFromDB queries SQLite for time-series bucket averages and aligns into contiguous buckets.
+func (s *Storage) buildBucketedSeriesFromDB(startWindow, now time.Time, bucketDuration time.Duration, timeFormat string) []models.HistoryPoint24h {
+	bucketSec := int64(bucketDuration.Seconds())
+	if bucketSec <= 0 {
+		return nil
+	}
+	numBuckets := int(now.Sub(startWindow) / bucketDuration)
+	if numBuckets <= 0 {
+		return nil
+	}
+	if numBuckets > 2000 {
+		numBuckets = 2000
+	}
+
+	bucketMap, err := s.queryTelemetryBuckets(startWindow, now, int(bucketSec))
+	if err != nil {
+		bucketMap = make(map[int64]models.HistoryPoint24h)
+	}
+
+	points := make([]models.HistoryPoint24h, numBuckets)
+	for i := 0; i < numBuckets; i++ {
+		tBucket := startWindow.Add(time.Duration(i) * bucketDuration)
+		bEpoch := (tBucket.Unix() / bucketSec) * bucketSec
+		timeLabel := tBucket.Format(timeFormat)
+
+		if p, ok := bucketMap[bEpoch]; ok {
+			p.TimeLabel = timeLabel
+			p.Timestamp = tBucket
+			points[i] = p
+		} else {
+			points[i] = models.HistoryPoint24h{
+				Timestamp:      tBucket,
+				TimeLabel:      timeLabel,
+				SolarPowerW:    0,
+				BatteryPowerW:  0,
+				PVVoltage:      0,
+				BatterySOC:     0,
+				BatteryVoltage: 0,
+			}
+		}
+	}
 	return points
 }
 

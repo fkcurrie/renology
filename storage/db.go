@@ -264,6 +264,43 @@ ORDER BY day ASC`
 	return result, rows.Err()
 }
 
+// queryTelemetryBuckets returns time-series buckets aggregated by SQLite.
+func (s *Storage) queryTelemetryBuckets(start, end time.Time, bucketSeconds int) (map[int64]models.HistoryPoint24h, error) {
+	if s.db == nil {
+		return nil, fmt.Errorf("sqlite db not initialized")
+	}
+
+	query := `
+SELECT
+    (strftime('%s', timestamp) / ?) * ? as b_epoch,
+    CAST(ROUND(AVG(pv_w)) AS INTEGER) as avg_pv_w,
+    CAST(ROUND(AVG(CASE WHEN battery_w > 0 THEN battery_w ELSE battery_v * battery_a END)) AS INTEGER) as avg_batt_w,
+    COALESCE(ROUND(AVG(pv_v), 1), 0.0) as avg_pv_v,
+    CAST(ROUND(AVG(battery_soc)) AS INTEGER) as avg_soc,
+    COALESCE(ROUND(AVG(battery_v), 2), 0.0) as avg_batt_v
+FROM telemetry
+WHERE timestamp >= ? AND timestamp <= ?
+GROUP BY (strftime('%s', timestamp) / ?)
+ORDER BY b_epoch ASC`
+
+	rows, err := s.db.Query(query, bucketSeconds, bucketSeconds, start.Format(time.RFC3339Nano), end.Format(time.RFC3339Nano), bucketSeconds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	results := make(map[int64]models.HistoryPoint24h)
+	for rows.Next() {
+		var epoch int64
+		var p models.HistoryPoint24h
+		if err := rows.Scan(&epoch, &p.SolarPowerW, &p.BatteryPowerW, &p.PVVoltage, &p.BatterySOC, &p.BatteryVoltage); err == nil {
+			p.Timestamp = time.Unix(epoch, 0)
+			results[epoch] = p
+		}
+	}
+	return results, rows.Err()
+}
+
 // migrateLegacyJSONL reads existing JSONL lines and batch-inserts them into SQLite.
 func (s *Storage) migrateLegacyJSONL() error {
 	f, err := os.Open(s.jsonlPath)
