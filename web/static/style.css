@@ -31,31 +31,46 @@
 }
 
 html, body {
-  width: 100vw;
-  height: 100vh;
+  width: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
   margin: 0;
   padding: 0;
   background-color: var(--bg-primary);
   color: var(--text-main);
   font-family: var(--font-family);
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-body.kiosk-mode {
-  overflow: hidden;
+/* Custom sleek scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-primary);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--bg-card-border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
 }
 
 .kiosk-container {
   display: flex;
   flex-direction: column;
-  width: 100vw;
-  height: 100vh;
-  max-height: 100vh;
-  padding: 8px 14px;
+  width: 100%;
+  max-width: 100vw;
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: 8px 12px;
   gap: 8px;
   box-sizing: border-box;
-  overflow: hidden;
 }
 
 /* Header */
@@ -455,12 +470,17 @@ body.kiosk-mode {
   display: flex;
   justify-content: center;
   align-items: center;
-  margin: 4px 0 10px 0;
+  flex: 1 1 0;
+  min-height: 150px;
+  width: 100%;
+  margin: 2px 0 8px 0;
 }
 
 #fuelGaugeCanvas {
+  width: 100% !important;
+  height: 100% !important;
   max-width: 100%;
-  height: auto;
+  display: block;
 }
 
 .gauge-center-readout {
@@ -550,14 +570,16 @@ body.kiosk-mode {
   justify-content: center;
   align-items: center;
   flex: 1 1 0;
-  min-height: 0;
+  min-height: 150px;
+  width: 100%;
   margin: 2px 0 6px 0;
 }
 
 #speedometerCanvas {
+  width: 100% !important;
+  height: 100% !important;
   max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
+  display: block;
 }
 
 .speedometer-center-readout {
@@ -930,7 +952,7 @@ body.kiosk-mode {
   position: relative;
   width: 100%;
   flex: 1 1 0;
-  min-height: 0;
+  min-height: 140px;
   margin: 4px 0;
 }
 
@@ -1020,10 +1042,117 @@ body.kiosk-mode {
   margin-right: 6px;
 }
 
-/* Responsive Scaling for Surface Go 2 and smaller displays */
-@media (max-width: 1024px) {
+/* =========================================================================
+   RESPONSIVE DESIGN & SCREEN-SIZE AWARENESS ENGINE
+   Supports: Google Pixel 9 & Mobile (<=767px), Tablets (768-1024px),
+             Laptops (<760px height), and Surface Go 2 Kiosk (>=1200x760px)
+   ========================================================================= */
+
+/* 1. Large Screens & Standalone Surface Go 2 Kiosk (Locked 100vh) */
+@media (min-width: 1200px) and (min-height: 760px) {
+  html, body {
+    height: 100vh;
+    overflow: hidden;
+  }
+  .kiosk-container {
+    height: 100vh;
+    max-height: 100vh;
+    overflow: hidden;
+    padding: 8px 14px;
+    gap: 8px;
+  }
   .dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-rows: minmax(0, 1.15fr) minmax(0, 0.85fr);
+    flex: 1 1 0;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .chart-24h {
+    grid-column: span 2;
+  }
+  .chart-7d {
+    grid-column: span 1;
+  }
+  .gauge-wrapper, .speedometer-wrapper {
+    flex: 1 1 0;
+    min-height: 0;
+    height: auto;
+  }
+  .chart-container {
+    flex: 1 1 0;
+    min-height: 0;
+    height: auto;
+  }
+}
+
+/* 2. Laptops & Desktop Windows with Compact Height (< 760px) */
+@media (min-width: 1025px) and (max-height: 759px) {
+  .dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-rows: auto auto;
+    flex: none;
+    height: auto;
+    gap: 10px;
+    overflow: visible;
+  }
+  .card {
+    flex: none;
+    height: auto;
+    min-height: auto;
+    overflow: visible;
+  }
+  .chart-24h {
+    grid-column: span 2;
+  }
+  .chart-7d {
+    grid-column: span 1;
+  }
+  .gauge-wrapper {
+    height: 200px;
+  }
+  .speedometer-wrapper {
+    height: 190px;
+  }
+  .chart-container {
+    height: 220px;
+  }
+}
+
+/* 3. Tablets, Small Laptops & Split Windows (768px - 1024px) */
+@media (min-width: 768px) and (max-width: 1024px) {
+  .kiosk-header {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 12px;
+  }
+  .header-center {
+    order: 3;
+    width: 100%;
+    justify-content: space-between;
+  }
+  .dashboard-grid {
+    display: grid;
     grid-template-columns: repeat(2, 1fr);
+    grid-template-rows: auto;
+    flex: none;
+    height: auto;
+    gap: 10px;
+    overflow: visible;
+  }
+  .card {
+    flex: none;
+    height: auto;
+    min-height: auto;
+    overflow: visible;
+  }
+  .battery-card {
+    grid-column: span 1;
+  }
+  .solar-card {
+    grid-column: span 1;
   }
   .system-card {
     grid-column: span 2;
@@ -1033,5 +1162,284 @@ body.kiosk-mode {
   }
   .chart-7d {
     grid-column: span 2;
+  }
+  .gauge-wrapper {
+    height: 210px;
+  }
+  .speedometer-wrapper {
+    height: 200px;
+  }
+  .chart-container {
+    height: 240px;
+  }
+}
+
+/* 4. Google Pixel 9 & Mobile Handsets (<= 767px) */
+@media (max-width: 767px) {
+  .kiosk-container {
+    padding: 8px 8px max(12px, env(safe-area-inset-bottom, 12px)) 8px;
+    gap: 8px;
+  }
+
+  /* Compact Mobile Header */
+  .kiosk-header {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 10px;
+    gap: 8px;
+  }
+
+  .brand-group {
+    order: 1;
+    gap: 8px;
+  }
+
+  .brand-logo {
+    font-size: 22px;
+  }
+
+  .brand-title {
+    font-size: 16px;
+    letter-spacing: 1px;
+  }
+
+  .brand-subtitle {
+    font-size: 9px;
+  }
+
+  .header-controls {
+    order: 2;
+    gap: 8px;
+  }
+
+  #fullscreenBtn {
+    display: none;
+  }
+
+  .clock-display {
+    font-size: 13px;
+  }
+
+  .connection-heartbeat {
+    font-size: 10px;
+    padding: 4px 8px;
+  }
+
+  .header-center {
+    order: 3;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .device-pill, .header-weather-pill {
+    width: 100%;
+    justify-content: center;
+    font-size: 11px;
+    padding: 5px 8px;
+  }
+
+  /* Mobile Story Banner */
+  .human-story-banner {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 8px 10px;
+  }
+
+  .story-left {
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .story-icon {
+    font-size: 20px;
+    margin-top: 2px;
+  }
+
+  .story-headline {
+    font-size: 12px;
+    line-height: 1.25;
+  }
+
+  .story-desc {
+    font-size: 11.5px;
+    white-space: normal;
+    line-height: 1.4;
+    margin-top: 2px;
+  }
+
+  .story-right {
+    margin-left: 0;
+    width: 100%;
+  }
+
+  .story-pill {
+    width: 100%;
+    justify-content: center;
+    font-size: 11px;
+    padding: 5px 8px;
+  }
+
+  /* Single Column Mobile Dashboard Grid */
+  .dashboard-grid {
+    display: flex;
+    flex-direction: column;
+    flex: none;
+    height: auto;
+    min-height: auto;
+    gap: 12px;
+    width: 100%;
+    overflow: visible;
+  }
+
+  .card {
+    flex: none;
+    width: 100%;
+    height: auto;
+    min-height: auto;
+    padding: 12px 14px;
+    overflow: visible;
+  }
+
+  .battery-card, .solar-card, .system-card, .chart-24h, .chart-7d {
+    grid-column: span 1 !important;
+  }
+
+  /* Mobile Fuel Gauge */
+  .gauge-wrapper {
+    height: 220px;
+    min-height: 200px;
+    width: 100%;
+    position: relative;
+    margin: 4px 0 8px 0;
+  }
+
+  .gauge-soc {
+    font-size: clamp(34px, 8.5vw, 42px);
+  }
+
+  .gauge-soc .unit {
+    font-size: 18px;
+  }
+
+  .metrics-row {
+    padding: 8px 6px;
+    gap: 4px;
+  }
+
+  .metric-label {
+    font-size: 8.5px;
+  }
+
+  .metric-val {
+    font-size: 14px;
+  }
+
+  /* Mobile Speedometer */
+  .speedometer-wrapper {
+    height: 205px;
+    min-height: 190px;
+    width: 100%;
+    position: relative;
+    margin: 2px 0 6px 0;
+  }
+
+  .speedo-speed {
+    font-size: clamp(24px, 6.5vw, 28px);
+  }
+
+  .speedo-speed .unit {
+    font-size: 14px;
+  }
+
+  .potential-banner {
+    padding: 5px 8px;
+    gap: 4px;
+  }
+
+  .potential-val {
+    font-size: 12px;
+  }
+
+  /* Mobile Charts */
+  .chart-header-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+
+  .chart-header-row .card-header {
+    width: 100%;
+  }
+
+  .timespan-selector {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    justify-content: flex-start;
+    padding: 3px;
+    gap: 3px;
+  }
+
+  .timespan-selector::-webkit-scrollbar {
+    display: none;
+  }
+
+  .span-btn {
+    padding: 5px 9px;
+    font-size: 11px;
+    flex-shrink: 0;
+  }
+
+  .chart-container {
+    height: 220px;
+    min-height: 200px;
+    width: 100%;
+    position: relative;
+  }
+
+  .chart-7d .chart-container {
+    height: 190px;
+    min-height: 170px;
+  }
+
+  .chart-legend {
+    flex-wrap: wrap;
+    gap: 6px 12px;
+    font-size: 10px;
+    line-height: 1.3;
+  }
+
+  .legend-item {
+    font-size: 10px;
+  }
+
+  .legend-time {
+    width: 100%;
+    text-align: right;
+    font-size: 9.5px;
+    margin-top: 2px;
+  }
+
+  /* Mobile Tooltip Safe Boundaries */
+  .chart-tooltip {
+    max-width: 88vw;
+    font-size: 11px;
+    white-space: normal;
+  }
+
+  /* Mobile Footer */
+  .kiosk-footer {
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    text-align: center;
+    font-size: 10px;
+    padding: 8px 4px 16px 4px;
   }
 }

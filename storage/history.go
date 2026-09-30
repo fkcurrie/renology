@@ -214,16 +214,15 @@ func (s *Storage) build24hSeries(records []models.Telemetry, now time.Time) []mo
 				BatteryVoltage: math.Round((b.sumBattVolt/float64(b.count))*100) / 100,
 			})
 		} else {
-			// Synthesize natural diurnal baseline for hours prior to recording
-			watts, pvVolts, soc, battVolts := simulateSolarDiurnal(tBucket)
+			// Real telemetry only: if unrecorded, values are 0
 			points = append(points, models.HistoryPoint24h{
 				Timestamp:      tBucket,
 				TimeLabel:      timeLabel,
-				SolarPowerW:    watts,
-				BatteryPowerW:  watts,
-				PVVoltage:      pvVolts,
-				BatterySOC:     soc,
-				BatteryVoltage: battVolts,
+				SolarPowerW:    0,
+				BatteryPowerW:  0,
+				PVVoltage:      0,
+				BatterySOC:     0,
+				BatteryVoltage: 0,
 			})
 		}
 	}
@@ -249,25 +248,19 @@ func (s *Storage) buildNDaySeries(dailyMap map[string]models.DailySummaryRecord,
 			dayLabel = "Yesterday"
 		}
 
-		if record, ok := dailyMap[dateStr]; ok && (record.EnergyWh > 0 || record.PeakSolarWatts > 0) {
+		if record, ok := dailyMap[dateStr]; ok {
 			record.DayLabel = dayLabel
 			days[nDays-1-i] = record
 		} else {
-			// Seasonal variation: peak harvest in summer (month 6-7), lower in winter (month 12-1)
-			month := int(targetDate.Month())
-			seasonalFactor := 0.65 + 0.35*math.Sin((float64(month-1)/12.0)*2.0*math.Pi-math.Pi/2.0)
-			baseWh, basePeak := simulateDayYield(targetDate.Weekday())
-			synWh := int(float64(baseWh) * seasonalFactor)
-			synPeak := int(float64(basePeak) * seasonalFactor)
-
+			// Real telemetry only: prior to monitoring installation, values are 0
 			days[nDays-1-i] = models.DailySummaryRecord{
 				Date:           dateStr,
 				DayLabel:       dayLabel,
-				PeakSolarWatts: synPeak,
-				EnergyWh:       synWh,
-				EnergyKWh:      math.Round((float64(synWh)/1000.0)*100) / 100,
-				AvgBatterySOC:  98,
-				MaxPVVoltage:   36.5,
+				PeakSolarWatts: 0,
+				EnergyWh:       0,
+				EnergyKWh:      0,
+				AvgBatterySOC:  0,
+				MaxPVVoltage:   0,
 			}
 		}
 	}
@@ -366,14 +359,14 @@ func (s *Storage) build7dSeries(records []models.Telemetry, now time.Time) []mod
 				AvgBatterySOC:  avgSOC,
 			}
 		} else {
-			syntheticWh, syntheticPeakW := simulateDayYield(targetDate.Weekday())
+			// Real telemetry only: if unrecorded, values are 0
 			days[6-i] = models.DailySummary7d{
 				Date:           dateStr,
 				DayLabel:       dayLabel,
-				PeakSolarWatts: syntheticPeakW,
-				EnergyWh:       syntheticWh,
-				EnergyKWh:      math.Round((float64(syntheticWh)/1000.0)*100) / 100,
-				AvgBatterySOC:  96,
+				PeakSolarWatts: 0,
+				EnergyWh:       0,
+				EnergyKWh:      0,
+				AvgBatterySOC:  0,
 			}
 		}
 	}
@@ -381,60 +374,6 @@ func (s *Storage) build7dSeries(records []models.Telemetry, now time.Time) []mod
 	return days
 }
 
-
-// simulateSolarDiurnal returns plausible solar metrics based on time of day (sun angle).
-func simulateSolarDiurnal(t time.Time) (watts int, pvVolts float64, soc int, battVolts float64) {
-	hour := float64(t.Hour()) + float64(t.Minute())/60.0
-
-	// Night time: 20:00 to 06:30
-	if hour < 6.5 || hour > 19.5 {
-		return 0, 0.0, 95, 13.15
-	}
-
-	// Solar day (6.5 to 19.5, solar noon ~ 13.0)
-	solarAngle := (hour - 6.5) / (19.5 - 6.5) * math.Pi
-	intensity := math.Sin(solarAngle)
-	if intensity < 0 {
-		intensity = 0
-	}
-
-	// Peak 195W solar production for a 200W panel
-	watts = int(195.0 * math.Pow(intensity, 1.2))
-	if watts < 0 {
-		watts = 0
-	}
-
-	pvVolts = 18.0 + (12.5 * intensity) // 18V to 30.5V
-	pvVolts = math.Round(pvVolts*10) / 10
-
-	soc = 92 + int(8.0*intensity) // 92% to 100%
-	if soc > 100 {
-		soc = 100
-	}
-
-	battVolts = 13.10 + (0.55 * intensity) // 13.10V to 13.65V
-	battVolts = math.Round(battVolts*100) / 100
-
-	return watts, pvVolts, soc, battVolts
-}
-
-// simulateDayYield returns baseline Wh and peak W for days prior to monitoring.
-func simulateDayYield(weekday time.Weekday) (wh int, peakW int) {
-	// Slight variation by day of week
-	yields := map[time.Weekday][2]int{
-		time.Sunday:    {465, 198},
-		time.Monday:    {420, 185},
-		time.Tuesday:   {510, 204},
-		time.Wednesday: {390, 172},
-		time.Thursday:  {480, 195},
-		time.Friday:    {445, 188},
-		time.Saturday:  {505, 202},
-	}
-	if val, ok := yields[weekday]; ok {
-		return val[0], val[1]
-	}
-	return 450, 190
-}
 
 // GetRecentTelemetry retrieves recent telemetry records and computes a minute-by-minute downsampled summary.
 func (s *Storage) GetRecentTelemetry(minutes int, referenceTime time.Time) (*models.RecentHistoryResponse, []models.Telemetry, error) {
