@@ -168,6 +168,7 @@ func (s *Storage) GetHistory(referenceTime time.Time) (*models.HistoryResponse, 
 		Days180d:   days180d,
 		Days365d:   days365d,
 		Months12m:  months12m,
+		SunTimes:   GetDorsetSunTimes(referenceTime),
 	}
 
 	s.cachedHistory = resp

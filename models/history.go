@@ -45,6 +45,22 @@ type MonthlySummaryRecord struct {
 	DailyAvgWh     int     `json:"daily_avg_wh"`    // Daily average generation in Wh
 }
 
+// SunTimes encapsulates official astronomical sunrise and sunset data for a specific location.
+type SunTimes struct {
+	Location    string    `json:"location"`     // e.g. "Dorset, Ontario"
+	Latitude    float64   `json:"latitude"`     // 45.2447
+	Longitude   float64   `json:"longitude"`    // -78.8950
+	Sunrise     time.Time `json:"sunrise"`      // Exact sunrise timestamp
+	Sunset      time.Time `json:"sunset"`       // Exact sunset timestamp
+	SolarNoon   time.Time `json:"solar_noon"`    // Exact solar noon timestamp
+	SunriseTime string    `json:"sunrise_time"` // "07:11"
+	SunsetTime  string    `json:"sunset_time"`  // "19:00"
+	SolarNoonTime string  `json:"solar_noon_time"` // "13:05"
+	DayLength   string    `json:"day_length"`   // e.g. "11h 49m"
+	IsDaylight  bool      `json:"is_daylight"`  // true if current time is between sunrise and sunset
+	Source      string    `json:"source"`       // "NOAA / NRC Canada Official Ephemeris"
+}
+
 // HistoryResponse encapsulates both 24-hour and multi-timespan historical telemetry data.
 type HistoryResponse struct {
 	Points24h  []HistoryPoint24h      `json:"points_24h"`
@@ -59,6 +75,7 @@ type HistoryResponse struct {
 	Days180d   []DailySummaryRecord   `json:"days_180d"`
 	Days365d   []DailySummaryRecord   `json:"days_365d"`
 	Months12m  []MonthlySummaryRecord `json:"months_12m"`
+	SunTimes   *SunTimes              `json:"sun_times,omitempty"`
 }
 
 // RecentMinutePoint represents an aggregated 1-minute point in a recent telemetry report.

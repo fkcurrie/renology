@@ -101,6 +101,7 @@
   const elLegItemPower = document.getElementById('legItemPower');
   const elLegItemBatt = document.getElementById('legItemBatt');
   const elLegItemSoc = document.getElementById('legItemSoc');
+  const elLegItemSun = document.getElementById('legItemSun');
   const elTimespanSelector = document.getElementById('timespanSelector');
 
   // --- Canvases ---
@@ -518,6 +519,58 @@
   let cachedMetrics24h = null;
   let activeHoverIdx24h = -1;
 
+  // Official NOAA / NRC Canada astronomical ephemeris for Dorset, Ontario (45.2447° N, 78.8950° W)
+  function getDorsetSunTimes(refDate) {
+    if (historyData && historyData.sun_times && historyData.sun_times.sunrise && historyData.sun_times.sunset) {
+      return historyData.sun_times;
+    }
+    const d = refDate || new Date();
+    const lat = 45.2447;
+    const lon = -78.8950;
+    const startOfYear = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    const dayOfYear = Math.floor((d.getTime() - startOfYear.getTime()) / (24 * 3600 * 1000)) + 1;
+    const gamma = (2 * Math.PI / 365) * (dayOfYear - 1);
+    const eqtime = 229.18 * (0.000075 + 0.001868 * Math.cos(gamma) - 0.032077 * Math.sin(gamma)
+                             - 0.014615 * Math.cos(2 * gamma) - 0.040849 * Math.sin(2 * gamma));
+    const decl = 0.006918 - 0.399912 * Math.cos(gamma) + 0.070257 * Math.sin(gamma)
+                 - 0.006758 * Math.cos(2 * gamma) + 0.000907 * Math.sin(2 * gamma)
+                 - 0.002697 * Math.cos(3 * gamma) + 0.00148 * Math.sin(3 * gamma);
+    const zenithRad = 90.833 * Math.PI / 180;
+    const latRad = lat * Math.PI / 180;
+    const cosHA = (Math.cos(zenithRad) / (Math.cos(latRad) * Math.cos(decl))) - (Math.tan(latRad) * Math.tan(decl));
+    if (cosHA > 1 || cosHA < -1) return null;
+    const haDeg = Math.acos(cosHA) * 180 / Math.PI;
+    const solarNoonUTCMin = 720 - (4 * lon) - eqtime;
+    const sunriseUTCMin = solarNoonUTCMin - (haDeg * 4);
+    const sunsetUTCMin = solarNoonUTCMin + (haDeg * 4);
+
+    const midnightUTC = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+    const sr = new Date(midnightUTC + sunriseUTCMin * 60000);
+    const ss = new Date(midnightUTC + sunsetUTCMin * 60000);
+    const sn = new Date(midnightUTC + solarNoonUTCMin * 60000);
+
+    const pad = n => (n < 10 ? '0' + n : '' + n);
+    const srTime = pad(sr.getHours()) + ':' + pad(sr.getMinutes());
+    const ssTime = pad(ss.getHours()) + ':' + pad(ss.getMinutes());
+    const snTime = pad(sn.getHours()) + ':' + pad(sn.getMinutes());
+    const dayLenMin = Math.round((ss.getTime() - sr.getTime()) / 60000);
+    const dayLength = Math.floor(dayLenMin / 60) + 'h ' + pad(dayLenMin % 60) + 'm';
+
+    return {
+      location: 'Dorset, Ontario',
+      latitude: lat,
+      longitude: lon,
+      sunrise: sr.toISOString(),
+      sunset: ss.toISOString(),
+      solar_noon: sn.toISOString(),
+      sunrise_time: srTime,
+      sunset_time: ssTime,
+      solar_noon_time: snTime,
+      day_length: dayLength,
+      source: 'NOAA / NRC Canada Astronomical Ephemeris'
+    };
+  }
+
   function draw24hChart(points, mode) {
     if (!ctx24h || !points || points.length === 0) return;
     if (!mode) mode = currentTimespan || 'today';
@@ -530,7 +583,7 @@
     // Margins: left for Watts, right for Volts, bottom for timestamps
     const padLeft = 45;
     const padRight = 38;
-    const padTop = 16;
+    const padTop = 26;
     const padBottom = 26;
     const plotW = w - padLeft - padRight;
     const plotH = h - padTop - padBottom;
@@ -573,6 +626,67 @@
       }
     }
 
+    // Toggle sun legend item based on mode
+    if (elLegItemSun) {
+      elLegItemSun.style.display = (mode === 'today') ? 'inline-flex' : 'none';
+    }
+
+    // Determine Sunrise and Sunset positions for Dorset, Ontario
+    let xSunrise = null;
+    let xSunset = null;
+    let sunTimes = null;
+
+    if (mode === 'today') {
+      let tStart = 0;
+      let tEnd = 0;
+      if (points.length > 0 && points[0].timestamp && points[points.length - 1].timestamp) {
+        tStart = new Date(points[0].timestamp).getTime();
+        tEnd = new Date(points[points.length - 1].timestamp).getTime();
+      }
+      const tSpan = tEnd - tStart;
+      sunTimes = getDorsetSunTimes(tEnd ? new Date(tEnd) : new Date());
+
+      if (sunTimes && sunTimes.sunrise && sunTimes.sunset) {
+        const srBase = new Date(sunTimes.sunrise).getTime();
+        const ssBase = new Date(sunTimes.sunset).getTime();
+
+        if (tSpan > 0) {
+          // Check previous day, current day, and next day to locate instances in window
+          [-86400000, 0, 86400000].forEach(offset => {
+            const srT = srBase + offset;
+            if (srT >= tStart && srT <= tEnd) {
+              xSunrise = padLeft + ((srT - tStart) / tSpan) * plotW;
+            }
+            const ssT = ssBase + offset;
+            if (ssT >= tStart && ssT <= tEnd) {
+              xSunset = padLeft + ((ssT - tStart) / tSpan) * plotW;
+            }
+          });
+        }
+
+        // Proportional fallback within 24h
+        if (xSunrise === null && sunTimes.sunrise_time) {
+          const [h, m] = sunTimes.sunrise_time.split(':').map(Number);
+          xSunrise = padLeft + ((h * 60 + m) / 1440) * plotW;
+        }
+        if (xSunset === null && sunTimes.sunset_time) {
+          const [h, m] = sunTimes.sunset_time.split(':').map(Number);
+          xSunset = padLeft + ((h * 60 + m) / 1440) * plotW;
+        }
+      }
+
+      if (elWindow24hLabel && sunTimes) {
+        elWindow24hLabel.innerHTML = `24-Hour Flow &bull; <span style="color:#fbbf24;">🌅 ${sunTimes.sunrise_time}</span> &bull; <span style="color:#f97316;">🌇 ${sunTimes.sunset_time}</span> <span style="color:#94a3b8;">(${sunTimes.day_length} day in Dorset, ON)</span>`;
+      }
+    } else if (elWindow24hLabel) {
+      if (mode === 'week') elWindow24hLabel.textContent = '7-Day Continuous Solar & Battery Flow (15m avg)';
+      else if (mode === 'month') elWindow24hLabel.textContent = '30-Day Continuous Solar & Battery Flow (3h avg)';
+      else if (mode === 'quarter') elWindow24hLabel.textContent = 'Quarterly Solar & Battery Flow (6h avg)';
+      else if (mode === 'halfyear') elWindow24hLabel.textContent = '6-Month Solar & Battery Flow (12h avg)';
+      else if (mode === 'year') elWindow24hLabel.textContent = '1-Year Solar & Battery Flow (24h avg)';
+      else elWindow24hLabel.textContent = 'Multi-Timespan Solar & Battery Flow';
+    }
+
     // 1. Grid Lines & Dual Y-Axis Labels
     const ySteps = 4;
     for (let i = 0; i <= ySteps; i++) {
@@ -603,11 +717,11 @@
     ctx24h.font = 'bold 9px var(--font-mono)';
     ctx24h.fillStyle = '#f59e0b';
     ctx24h.textAlign = 'right';
-    ctx24h.fillText('WATTS', padLeft - 6, padTop - 4);
+    ctx24h.fillText('WATTS', padLeft - 6, padTop - 10);
 
     ctx24h.fillStyle = '#38bdf8';
     ctx24h.textAlign = 'left';
-    ctx24h.fillText('VOLTS', w - padRight + 6, padTop - 4);
+    ctx24h.fillText('VOLTS', w - padRight + 6, padTop - 10);
 
     // 2. Build Coordinate Sets
     const coords = [];
@@ -619,6 +733,22 @@
       const ySoc = padTop + plotH - ((p.battery_soc || 0) / 100) * plotH;
       coords.push({ x, ySolar, yBatt, yVolt, ySoc, p });
     });
+
+    // Background Daylight Shading Band for Dorset, Ontario
+    if (mode === 'today' && xSunrise !== null && xSunset !== null) {
+      const xLeft = Math.max(padLeft, Math.min(xSunrise, xSunset));
+      const xRight = Math.min(w - padRight, Math.max(xSunrise, xSunset));
+      if (xRight > xLeft) {
+        ctx24h.save();
+        const dayBandGrad = ctx24h.createLinearGradient(0, padTop, 0, padTop + plotH);
+        dayBandGrad.addColorStop(0, 'rgba(251, 191, 36, 0.05)');
+        dayBandGrad.addColorStop(0.5, 'rgba(251, 191, 36, 0.025)');
+        dayBandGrad.addColorStop(1, 'rgba(251, 191, 36, 0.008)');
+        ctx24h.fillStyle = dayBandGrad;
+        ctx24h.fillRect(xLeft, padTop, xRight - xLeft, plotH);
+        ctx24h.restore();
+      }
+    }
 
     // 3. Layer A: Battery SOC Overlay (Subtle dotted line, 0-100%)
     ctx24h.beginPath();
@@ -680,6 +810,95 @@
     ctx24h.strokeStyle = '#10b981';
     ctx24h.lineWidth = 1.8;
     ctx24h.stroke();
+
+    // Layer E.2: Vertical Lines for Sunrise and Sunset (Dorset, Ontario)
+    if (mode === 'today' && sunTimes) {
+      // --- SUNRISE VERTICAL LINE & BADGE ---
+      if (xSunrise !== null && xSunrise >= padLeft && xSunrise <= w - padRight) {
+        ctx24h.save();
+        ctx24h.beginPath();
+        ctx24h.setLineDash([5, 4]);
+        ctx24h.moveTo(xSunrise, padTop);
+        ctx24h.lineTo(xSunrise, padTop + plotH);
+        ctx24h.strokeStyle = 'rgba(251, 191, 36, 0.9)';
+        ctx24h.lineWidth = 1.8;
+        ctx24h.shadowColor = '#fbbf24';
+        ctx24h.shadowBlur = 6;
+        ctx24h.stroke();
+        ctx24h.setLineDash([]);
+
+        // Top Pill Badge
+        const srLabel = `🌅 ${sunTimes.sunrise_time || '07:11'}`;
+        ctx24h.font = 'bold 10px var(--font-mono, monospace)';
+        const pillW = ctx24h.measureText(srLabel).width + 12;
+        const pillH = 18;
+        const pillX = Math.max(padLeft + 2, Math.min(w - padRight - pillW - 2, xSunrise - pillW / 2));
+        const pillY = padTop + 2;
+
+        ctx24h.fillStyle = 'rgba(15, 23, 42, 0.92)';
+        ctx24h.strokeStyle = '#fbbf24';
+        ctx24h.lineWidth = 1.2;
+        ctx24h.beginPath();
+        if (ctx24h.roundRect) ctx24h.roundRect(pillX, pillY, pillW, pillH, 4);
+        else ctx24h.rect(pillX, pillY, pillW, pillH);
+        ctx24h.fill();
+        ctx24h.stroke();
+
+        ctx24h.fillStyle = '#fef08a';
+        ctx24h.textAlign = 'center';
+        ctx24h.fillText(srLabel, pillX + pillW / 2, pillY + 13);
+
+        // Bottom Label
+        ctx24h.font = 'bold 8px var(--font-mono, monospace)';
+        ctx24h.fillStyle = '#fbbf24';
+        ctx24h.textAlign = 'center';
+        ctx24h.fillText('SUNRISE', xSunrise, padTop + plotH - 4);
+        ctx24h.restore();
+      }
+
+      // --- SUNSET VERTICAL LINE & BADGE ---
+      if (xSunset !== null && xSunset >= padLeft && xSunset <= w - padRight) {
+        ctx24h.save();
+        ctx24h.beginPath();
+        ctx24h.setLineDash([5, 4]);
+        ctx24h.moveTo(xSunset, padTop);
+        ctx24h.lineTo(xSunset, padTop + plotH);
+        ctx24h.strokeStyle = 'rgba(249, 115, 22, 0.9)';
+        ctx24h.lineWidth = 1.8;
+        ctx24h.shadowColor = '#f97316';
+        ctx24h.shadowBlur = 6;
+        ctx24h.stroke();
+        ctx24h.setLineDash([]);
+
+        // Top Pill Badge
+        const ssLabel = `🌇 ${sunTimes.sunset_time || '19:00'}`;
+        ctx24h.font = 'bold 10px var(--font-mono, monospace)';
+        const pillW = ctx24h.measureText(ssLabel).width + 12;
+        const pillH = 18;
+        const pillX = Math.max(padLeft + 2, Math.min(w - padRight - pillW - 2, xSunset - pillW / 2));
+        const pillY = padTop + 2;
+
+        ctx24h.fillStyle = 'rgba(15, 23, 42, 0.92)';
+        ctx24h.strokeStyle = '#f97316';
+        ctx24h.lineWidth = 1.2;
+        ctx24h.beginPath();
+        if (ctx24h.roundRect) ctx24h.roundRect(pillX, pillY, pillW, pillH, 4);
+        else ctx24h.rect(pillX, pillY, pillW, pillH);
+        ctx24h.fill();
+        ctx24h.stroke();
+
+        ctx24h.fillStyle = '#fed7aa';
+        ctx24h.textAlign = 'center';
+        ctx24h.fillText(ssLabel, pillX + pillW / 2, pillY + 13);
+
+        // Bottom Label
+        ctx24h.font = 'bold 8px var(--font-mono, monospace)';
+        ctx24h.fillStyle = '#f97316';
+        ctx24h.textAlign = 'center';
+        ctx24h.fillText('SUNSET', xSunset, padTop + plotH - 4);
+        ctx24h.restore();
+      }
+    }
 
     // 8. Layer F: Active Hover / Touch Indicator Crosshair
     if (activeHoverIdx24h >= 0 && activeHoverIdx24h < coords.length) {
@@ -801,12 +1020,28 @@
     if (!timeStr) timeStr = p.time_label || '';
 
     let badge = '';
-    if (p.pv_voltage_v >= 20.0 && solW === 0 && soc >= 98) {
-      badge = '<div style="margin-top: 4px; padding: 2px 6px; background: rgba(245, 158, 11, 0.2); border: 1px solid rgba(245, 158, 11, 0.6); border-radius: 4px; font-size: 10px; color: #fef08a;">☀️ Sun Active • Solar Curtailed (Battery Full)</div>';
-    } else if (p.pv_voltage_v >= 20.0 && solW > 0) {
-      badge = '<div style="margin-top: 4px; padding: 2px 6px; background: rgba(16, 185, 129, 0.2); border: 1px solid rgba(16, 185, 129, 0.6); border-radius: 4px; font-size: 10px; color: #6ee7b7;">⚡ Active Solar Charging</div>';
-    } else if (p.pv_voltage_v < 8.0) {
-      badge = '<div style="margin-top: 4px; padding: 2px 6px; background: rgba(100, 116, 139, 0.2); border: 1px solid rgba(100, 116, 139, 0.4); border-radius: 4px; font-size: 10px; color: #94a3b8;">🌙 Night / No Sun</div>';
+    if (mode === 'today' && p.timestamp) {
+      const dPt = new Date(p.timestamp);
+      const st = getDorsetSunTimes(dPt);
+      if (st && st.sunrise && st.sunset) {
+        const srT = new Date(st.sunrise).getTime();
+        const ssT = new Date(st.sunset).getTime();
+        const pT = dPt.getTime();
+        if (Math.abs(pT - srT) <= 15 * 60000) {
+          badge = `<div style="margin-top: 4px; padding: 2px 6px; background: rgba(251, 191, 36, 0.25); border: 1px solid rgba(251, 191, 36, 0.7); border-radius: 4px; font-size: 10px; color: #fef08a;">🌅 Sunrise in Dorset, ON (${st.sunrise_time})</div>`;
+        } else if (Math.abs(pT - ssT) <= 15 * 60000) {
+          badge = `<div style="margin-top: 4px; padding: 2px 6px; background: rgba(249, 115, 22, 0.25); border: 1px solid rgba(249, 115, 22, 0.7); border-radius: 4px; font-size: 10px; color: #fed7aa;">🌇 Sunset in Dorset, ON (${st.sunset_time})</div>`;
+        }
+      }
+    }
+    if (!badge) {
+      if (p.pv_voltage_v >= 20.0 && solW === 0 && soc >= 98) {
+        badge = '<div style="margin-top: 4px; padding: 2px 6px; background: rgba(245, 158, 11, 0.2); border: 1px solid rgba(245, 158, 11, 0.6); border-radius: 4px; font-size: 10px; color: #fef08a;">☀️ Sun Active • Solar Curtailed (Battery Full)</div>';
+      } else if (p.pv_voltage_v >= 20.0 && solW > 0) {
+        badge = '<div style="margin-top: 4px; padding: 2px 6px; background: rgba(16, 185, 129, 0.2); border: 1px solid rgba(16, 185, 129, 0.6); border-radius: 4px; font-size: 10px; color: #6ee7b7;">⚡ Active Solar Charging</div>';
+      } else if (p.pv_voltage_v < 8.0) {
+        badge = '<div style="margin-top: 4px; padding: 2px 6px; background: rgba(100, 116, 139, 0.2); border: 1px solid rgba(100, 116, 139, 0.4); border-radius: 4px; font-size: 10px; color: #94a3b8;">🌙 Night / No Sun</div>';
+      }
     }
 
     tooltip24h.innerHTML = `
