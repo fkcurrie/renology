@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -109,6 +110,8 @@ func main() {
 		cancel()
 	}()
 
+	var wg sync.WaitGroup
+
 	// 1. Start embedded Kiosk Web Server if configured
 	if *httpAddr != "" {
 		webServer, err := web.NewServer(web.ServerConfig{
@@ -122,7 +125,9 @@ func main() {
 			log.Fatalf("Failed to initialize web server: %v", err)
 		}
 
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			if err := webServer.Start(ctx); err != nil {
 				log.Printf("[Web] Web server stopped: %v", err)
 			}
@@ -135,7 +140,11 @@ func main() {
 
 	// 2. Start Cloud Pusher if configured
 	if *cloudURL != "" {
-		go startCloudPusher(ctx, *cloudURL, *cloudToken, store, time.Duration(*pollSec)*time.Second, *verbose)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			startCloudPusher(ctx, *cloudURL, *cloudToken, store, time.Duration(*pollSec)*time.Second, *verbose)
+		}()
 	}
 
 	// 3. Run Poller or Web-Only Mode
@@ -158,6 +167,8 @@ func main() {
 		}
 	}
 
+	// Wait for background workers and web server to cleanly finish before closing storage
+	wg.Wait()
 	fmt.Println("Renology poller stopped.")
 }
 

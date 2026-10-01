@@ -22,9 +22,12 @@ func ParseDeviceInfo(payload []byte) (string, error) {
 	if len(payload) < 5 {
 		return "", fmt.Errorf("payload too short for device info: %d bytes", len(payload))
 	}
+	if payload[1] != 0x03 {
+		return "", fmt.Errorf("unexpected function code: 0x%02X", payload[1])
+	}
 	byteCount := int(payload[2])
-	if len(payload) < 3+byteCount {
-		return "", fmt.Errorf("incomplete payload: expected %d bytes, got %d", 3+byteCount, len(payload))
+	if len(payload) < 3+byteCount+2 {
+		return "", fmt.Errorf("incomplete payload: expected %d bytes, got %d", 3+byteCount+2, len(payload))
 	}
 	modelBytes := payload[3 : 3+byteCount]
 	model := strings.TrimSpace(strings.Trim(string(modelBytes), "\x00"))
@@ -55,6 +58,10 @@ func ParseControllerTelemetry(payload []byte, t *models.Telemetry) error {
 	byteCount := int(payload[2])
 	if byteCount < 68 {
 		return fmt.Errorf("unexpected byte count: %d (expected >= 68)", byteCount)
+	}
+	expectedTotalLen := 3 + byteCount + 2
+	if len(payload) < expectedTotalLen {
+		return fmt.Errorf("truncated frame: expected %d bytes for byteCount %d, got %d", expectedTotalLen, byteCount, len(payload))
 	}
 
 	t.DeviceType = "Solar Charge Controller"
@@ -134,14 +141,18 @@ func ParseControllerTelemetry(payload []byte, t *models.Telemetry) error {
 	}
 
 	// Fault codes: Register 0x0121 (Word 33) and 0x0122 (Word 34)
-	if len(payload) >= 75 {
-		// Full 35-word query: payload[69:73] contains registers 0x0121 and 0x0122 (4 bytes)
+	switch byteCount {
+	case 70: // 35 words: registers 0x0121 and 0x0122 (4 bytes)
 		t.FaultCode = binary.BigEndian.Uint32(payload[69:73])
 		t.FaultDescriptions = DecodeFaultCode(t.FaultCode)
-	} else if len(payload) >= 73 {
-		// Legacy 34-word query: only low 16 bits in payload[69:71] (payload[71:73] is CRC!)
+	case 68: // 34 words: low 16 bits in payload[69:71] (payload[71:73] is CRC)
 		t.FaultCode = uint32(binary.BigEndian.Uint16(payload[69:71]))
 		t.FaultDescriptions = DecodeFaultCode(t.FaultCode)
+	default:
+		if len(payload) >= 75 {
+			t.FaultCode = binary.BigEndian.Uint32(payload[69:73])
+			t.FaultDescriptions = DecodeFaultCode(t.FaultCode)
+		}
 	}
 
 	return nil
@@ -180,6 +191,9 @@ func DecodeFaultCode(code uint32) []string {
 func ParseBatteryType(payload []byte, t *models.Telemetry) error {
 	if len(payload) < 7 {
 		return fmt.Errorf("payload too short for battery type: %d bytes", len(payload))
+	}
+	if payload[1] != 0x03 {
+		return fmt.Errorf("unexpected function code: 0x%02X", payload[1])
 	}
 	rawType := binary.BigEndian.Uint16(payload[3:5])
 	if bType, ok := models.BatteryTypeText[rawType]; ok {

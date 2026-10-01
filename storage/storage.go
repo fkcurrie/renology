@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -15,7 +16,7 @@ import (
 
 // Storage handles local persistence of Renogy telemetry records.
 type Storage struct {
-	mu           sync.Mutex
+	mu           sync.RWMutex
 	outputDir    string
 	dbPath       string
 	db           *sql.DB
@@ -25,13 +26,14 @@ type Storage struct {
 	csvHeaderSet bool
 	rfSurveyPath      string
 	rfHeaderSet       bool
+	cachedLatest      *models.Telemetry
 	cachedHistory     *models.HistoryResponse
 	cachedHistoryTime time.Time
 }
 
 // NewStorage initializes storage files and SQLite database in the specified directory.
 func NewStorage(dir string) (*Storage, error) {
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, fmt.Errorf("failed to create storage dir: %w", err)
 	}
 
@@ -60,11 +62,12 @@ func NewStorage(dir string) (*Storage, error) {
 	return s, nil
 }
 
-// Close gracefully closes the SQLite database connection.
+// Close gracefully closes the SQLite database connection and checkpoints WAL.
 func (s *Storage) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.db != nil {
+		_, _ = s.db.Exec("PRAGMA wal_checkpoint(TRUNCATE);")
 		return s.db.Close()
 	}
 	return nil
@@ -72,23 +75,28 @@ func (s *Storage) Close() error {
 
 // Save records a new telemetry reading to SQLite, updates latest_status.json, appends to JSONL, and appends to CSV.
 func (s *Storage) Save(t *models.Telemetry) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if t.Timestamp.IsZero() {
 		t.Timestamp = time.Now()
 	}
 
-	// 1. Insert into indexed SQLite database
-	_ = s.insertTelemetrySQL(t)
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	// 1. Append to JSON Lines
+	// Update fast in-memory latest telemetry snapshot
+	s.cachedLatest = t
+
+	// 1. Insert into indexed SQLite database
+	if err := s.insertTelemetrySQL(t); err != nil {
+		log.Printf("[Storage] SQLite insert error: %v", err)
+	}
+
+	// 2. Append to JSON Lines
 	jsonData, err := json.Marshal(t)
 	if err != nil {
 		return fmt.Errorf("marshal telemetry error: %w", err)
 	}
 
-	f, err := os.OpenFile(s.jsonlPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(s.jsonlPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		return fmt.Errorf("open jsonl error: %w", err)
 	}
@@ -98,17 +106,17 @@ func (s *Storage) Save(t *models.Telemetry) error {
 	}
 	f.Close()
 
-	// 2. Atomically update latest_status.json
+	// 3. Atomically update latest_status.json
 	prettyJSON, err := json.MarshalIndent(t, "", "  ")
 	if err == nil {
 		tmpLatest := s.latestPath + ".tmp"
-		if err := os.WriteFile(tmpLatest, prettyJSON, 0644); err == nil {
+		if err := os.WriteFile(tmpLatest, prettyJSON, 0600); err == nil {
 			_ = os.Rename(tmpLatest, s.latestPath)
 		}
 	}
 
-	// 3. Append to CSV
-	csvFile, err := os.OpenFile(s.csvPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	// 4. Append to CSV
+	csvFile, err := os.OpenFile(s.csvPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err == nil {
 		writer := csv.NewWriter(csvFile)
 		if !s.csvHeaderSet {
@@ -168,7 +176,7 @@ func (s *Storage) RecordRFMeasurement(t time.Time, mac, name string, rssi int, c
 	// 1. Insert into SQLite rf_survey table
 	_ = s.insertRFMeasurementSQL(t, mac, name, rssi, connected, errStr)
 
-	f, err := os.OpenFile(s.rfSurveyPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(s.rfSurveyPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		return fmt.Errorf("open rf_survey.csv error: %w", err)
 	}

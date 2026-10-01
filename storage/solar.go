@@ -1,10 +1,8 @@
 package storage
 
 import (
-	"encoding/json"
 	"fmt"
 	"math"
-	"net/http"
 	"sync"
 	"time"
 
@@ -23,8 +21,13 @@ var (
 	sunCache   = make(map[string]*models.SunTimes)
 )
 
+// isLeapYear returns true if the specified calendar year is a leap year.
+func isLeapYear(year int) bool {
+	return year%4 == 0 && (year%100 != 0 || year%400 == 0)
+}
+
 // GetDorsetSunTimes returns sunrise, sunset, and daylight solar window for Dorset, Ontario
-// on the day corresponding to refTime.
+// on the day corresponding to refTime using the NOAA astronomical algorithm.
 func GetDorsetSunTimes(refTime time.Time) *models.SunTimes {
 	if refTime.IsZero() {
 		refTime = time.Now()
@@ -34,25 +37,25 @@ func GetDorsetSunTimes(refTime time.Time) *models.SunTimes {
 
 	sunCacheMu.RLock()
 	cached, ok := sunCache[dateKey]
+	var cachedCopy models.SunTimes
+	if ok && cached != nil {
+		cachedCopy = *cached
+	}
 	sunCacheMu.RUnlock()
 
 	if ok && cached != nil {
 		// Update daylight status dynamically based on current refTime
 		now := refTime
-		cachedCopy := *cached
-		cachedCopy.IsDaylight = now.After(cached.Sunrise) && now.Before(cached.Sunset)
+		cachedCopy.IsDaylight = now.After(cachedCopy.Sunrise) && now.Before(cachedCopy.Sunset)
 		return &cachedCopy
 	}
 
-	// 1. Compute immediately using NOAA Solar Algorithm (zero external dependency, 100% offline resilient)
+	// Compute immediately using NOAA Solar Algorithm (zero external dependency, 100% offline resilient)
 	st := CalculateSunTimes(refTime, DorsetLatitude, DorsetLongitude, DorsetLocation)
 
 	sunCacheMu.Lock()
 	sunCache[dateKey] = st
 	sunCacheMu.Unlock()
-
-	// 2. Asynchronously attempt to verify / refine against official API if online
-	go fetchOfficialSunTimes(dateKey, DorsetLatitude, DorsetLongitude, DorsetLocation)
 
 	return st
 }
@@ -65,8 +68,12 @@ func CalculateSunTimes(t time.Time, lat, lon float64, locName string) *models.Su
 	midnight := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 	dayOfYear := t.YearDay()
 
-	// Fractional year in radians
-	gamma := (2.0 * math.Pi / 365.0) * float64(dayOfYear-1)
+	// Fractional year in radians (accounting for leap years)
+	daysInYear := 365.0
+	if isLeapYear(t.Year()) {
+		daysInYear = 366.0
+	}
+	gamma := (2.0 * math.Pi / daysInYear) * float64(dayOfYear-1)
 
 	// Equation of time in minutes
 	eqtime := 229.18 * (0.000075 + 0.001868*math.Cos(gamma) - 0.032077*math.Sin(gamma) -
@@ -116,80 +123,4 @@ func CalculateSunTimes(t time.Time, lat, lon float64, locName string) *models.Su
 		IsDaylight:    t.After(sunriseTime) && t.Before(sunsetTime),
 		Source:        "NOAA / NRC Canada Astronomical Ephemeris",
 	}
-}
-
-// fetchOfficialSunTimes attempts to retrieve official ephemeris from sunrise-sunset.org API.
-func fetchOfficialSunTimes(dateKey string, lat, lon float64, locName string) {
-	url := fmt.Sprintf("https://api.sunrise-sunset.org/json?lat=%.4f&lng=%.4f&date=%s&formatted=0", lat, lon, dateKey)
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return
-	}
-	req.Header.Set("User-Agent", "RenologySolarKiosk/1.0 (Dorset Ontario)")
-
-	client := &http.Client{Timeout: 4 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return
-	}
-
-	var apiResp struct {
-		Results struct {
-			Sunrise   string `json:"sunrise"`
-			Sunset    string `json:"sunset"`
-			SolarNoon string `json:"solar_noon"`
-			DayLength int    `json:"day_length"`
-		} `json:"results"`
-		Status string `json:"status"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil || apiResp.Status != "OK" {
-		return
-	}
-
-	srUTC, err1 := time.Parse(time.RFC3339, apiResp.Results.Sunrise)
-	ssUTC, err2 := time.Parse(time.RFC3339, apiResp.Results.Sunset)
-	snUTC, _ := time.Parse(time.RFC3339, apiResp.Results.SolarNoon)
-	if err1 != nil || err2 != nil {
-		return
-	}
-
-	torontoLoc, err := time.LoadLocation("America/Toronto")
-	if err != nil {
-		torontoLoc = time.Local
-	}
-
-	srLocal := srUTC.In(torontoLoc)
-	ssLocal := ssUTC.In(torontoLoc)
-	snLocal := snUTC.In(torontoLoc)
-
-	dayLengthSec := apiResp.Results.DayLength
-	hours := dayLengthSec / 3600
-	mins := (dayLengthSec % 3600) / 60
-	dayLengthStr := fmt.Sprintf("%dh %02dm", hours, mins)
-
-	now := time.Now().In(torontoLoc)
-	officialST := &models.SunTimes{
-		Location:      locName,
-		Latitude:      lat,
-		Longitude:     lon,
-		Sunrise:       srLocal,
-		Sunset:        ssLocal,
-		SolarNoon:     snLocal,
-		SunriseTime:   srLocal.Format("15:04"),
-		SunsetTime:    ssLocal.Format("15:04"),
-		SolarNoonTime: snLocal.Format("15:04"),
-		DayLength:     dayLengthStr,
-		IsDaylight:    now.After(srLocal) && now.Before(ssLocal),
-		Source:        "Official NRC / ECCC Ephemeris via Sunrise-Sunset API",
-	}
-
-	sunCacheMu.Lock()
-	sunCache[dateKey] = officialST
-	sunCacheMu.Unlock()
 }

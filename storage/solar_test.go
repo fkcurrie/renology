@@ -56,3 +56,31 @@ func TestGetDorsetSunTimes(t *testing.T) {
 		t.Errorf("expected formatted sunrise and sunset times, got %s / %s", st.SunriseTime, st.SunsetTime)
 	}
 }
+
+func TestCalculateSunTimesLeapYearAndSolstices(t *testing.T) {
+	torontoLoc, err := time.LoadLocation("America/Toronto")
+	if err != nil {
+		torontoLoc = time.FixedZone("EST", -5*3600)
+	}
+
+	// 1. Leap year Day 366 (Dec 31, 2024)
+	leapDay366 := time.Date(2024, 12, 31, 12, 0, 0, 0, torontoLoc)
+	stLeap := CalculateSunTimes(leapDay366, DorsetLatitude, DorsetLongitude, DorsetLocation)
+	if stLeap == nil || stLeap.Sunrise.IsZero() || stLeap.Sunset.IsZero() {
+		t.Fatalf("CalculateSunTimes failed on leap day 366: %+v", stLeap)
+	}
+	if stLeap.Sunrise.Hour() != 7 && stLeap.Sunrise.Hour() != 8 {
+		t.Errorf("Expected winter sunrise hour 7 or 8 on Dec 31, got %d", stLeap.Sunrise.Hour())
+	}
+
+	// 2. Summer Solstice (June 21, 2026) - longest day of year
+	summerSolstice := time.Date(2026, 6, 21, 12, 0, 0, 0, torontoLoc)
+	stSummer := CalculateSunTimes(summerSolstice, DorsetLatitude, DorsetLongitude, DorsetLocation)
+	if stSummer == nil {
+		t.Fatalf("CalculateSunTimes failed on Summer Solstice")
+	}
+	// Sunrise in Dorset in June is around 05:30 EDT
+	if stSummer.Sunrise.Hour() != 5 {
+		t.Errorf("Expected Summer Solstice sunrise hour 5, got %d", stSummer.Sunrise.Hour())
+	}
+}

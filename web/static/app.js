@@ -2461,15 +2461,9 @@
 
       // Update Live Sync Status Indicator
       const elLastUpdated = document.getElementById('lastUpdatedText');
-      const elPulse = document.getElementById('blePulse');
       if (elLastUpdated && t.timestamp) {
         const d = new Date(t.timestamp);
         elLastUpdated.textContent = `Live Telemetry Synced: ${d.toLocaleTimeString()} (5s BLE loop • PV: ${(t.pv_voltage_v || 0).toFixed(1)}V)`;
-      }
-      if (elPulse) {
-        elPulse.style.animation = 'none';
-        void elPulse.offsetWidth;
-        elPulse.style.animation = 'pulse-animation 1.5s ease-in-out';
       }
     } catch (err) {
       updateConnectionStatus(false);
@@ -2536,9 +2530,25 @@
   fetchHistory();
   fetchWeather();
 
-  // Polling loops: 2s for live controller status, 5s for weather, 60s for historical aggregation
-  setInterval(fetchStatus, 2000);
-  setInterval(fetchWeather, 5000);
-  setInterval(fetchHistory, 60000);
+  // Polling loops: 5s for live controller status (matches BLE loop), 10s for weather, 60s for historical aggregation
+  let statusInterval = setInterval(fetchStatus, 5000);
+  let weatherInterval = setInterval(fetchWeather, 10000);
+  let historyInterval = setInterval(fetchHistory, 60000);
+
+  // Surface Go 2 Power Optimization: Pause polling when screen is sleeping or tab is hidden
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      clearInterval(statusInterval);
+      clearInterval(weatherInterval);
+      clearInterval(historyInterval);
+    } else {
+      fetchStatus();
+      fetchWeather();
+      fetchHistory();
+      statusInterval = setInterval(fetchStatus, 5000);
+      weatherInterval = setInterval(fetchWeather, 10000);
+      historyInterval = setInterval(fetchHistory, 60000);
+    }
+  });
 
 })();

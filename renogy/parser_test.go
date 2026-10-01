@@ -157,3 +157,57 @@ func TestParseControllerTelemetry34Words(t *testing.T) {
 		t.Errorf("Expected ChargingStatus MPPT, got %s", telem.ChargingStatus)
 	}
 }
+
+func TestParserValidationEdgeCases(t *testing.T) {
+	// 1. ParseDeviceInfo with bad function code
+	badFunc := []byte{0xFF, 0x01, 16, 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 0x00, 0x00}
+	if _, err := ParseDeviceInfo(badFunc); err == nil {
+		t.Errorf("Expected error for bad function code in ParseDeviceInfo, got nil")
+	}
+
+	// 2. ParseDeviceInfo with truncated frame
+	shortInfo := []byte{0xFF, 0x03, 16, 'A', 'B'}
+	if _, err := ParseDeviceInfo(shortInfo); err == nil {
+		t.Errorf("Expected error for truncated ParseDeviceInfo, got nil")
+	}
+
+	// 3. ParseSystemRatings with bad function code
+	badRatingsFunc := []byte{0xFF, 0x04, 0x02, 12, 40, 0x00, 0x00}
+	if _, _, err := ParseSystemRatings(badRatingsFunc); err == nil {
+		t.Errorf("Expected error for bad function code in ParseSystemRatings, got nil")
+	}
+
+	// 4. ParseControllerTelemetry with truncated frame
+	var telem models.Telemetry
+	shortTelem := make([]byte, 50)
+	shortTelem[0] = 0xFF
+	shortTelem[1] = 0x03
+	shortTelem[2] = 70
+	if err := ParseControllerTelemetry(shortTelem, &telem); err == nil {
+		t.Errorf("Expected error for truncated controller telemetry frame, got nil")
+	}
+
+	// 5. ParseControllerTelemetry with bad function code
+	badTelemFunc := make([]byte, 75)
+	badTelemFunc[0] = 0xFF
+	badTelemFunc[1] = 0x83 // Exception code
+	badTelemFunc[2] = 70
+	if err := ParseControllerTelemetry(badTelemFunc, &telem); err == nil {
+		t.Errorf("Expected error for exception function code in ParseControllerTelemetry, got nil")
+	}
+
+	// 6. Unknown battery type
+	unkBatt := []byte{0xFF, 0x03, 0x02, 0x00, 0x99, 0x00, 0x00}
+	if err := ParseBatteryType(unkBatt, &telem); err != nil {
+		t.Fatalf("ParseBatteryType failed on unknown type: %v", err)
+	}
+	if telem.BatteryType != "Type 153" {
+		t.Errorf("Expected 'Type 153', got '%s'", telem.BatteryType)
+	}
+
+	// 7. DecodeFaultCode multi-bit check
+	faults := DecodeFaultCode(0x00000005) // Bit 0 (Battery Over-Discharge) and Bit 2 (Battery Under-Voltage Warning)
+	if len(faults) != 2 {
+		t.Fatalf("Expected 2 fault descriptions, got %d (%v)", len(faults), faults)
+	}
+}

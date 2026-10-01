@@ -268,5 +268,26 @@ func TestCloudRelayPush(t *testing.T) {
 	if len(hist.Points24h) != 1 || hist.Points24h[0].SolarPowerW != 220 {
 		t.Errorf("Unexpected history response: %+v", hist)
 	}
+
+	// 6. Test Security Headers
+	if rec.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Errorf("Expected X-Content-Type-Options: nosniff, got %s", rec.Header().Get("X-Content-Type-Options"))
+	}
+	if rec.Header().Get("X-Frame-Options") != "SAMEORIGIN" {
+		t.Errorf("Expected X-Frame-Options: SAMEORIGIN, got %s", rec.Header().Get("X-Frame-Options"))
+	}
+	if !strings.Contains(rec.Header().Get("Content-Security-Policy"), "default-src 'self'") {
+		t.Errorf("Expected Content-Security-Policy, got %s", rec.Header().Get("Content-Security-Policy"))
+	}
+
+	// 7. Test oversized payload rejection (>512KB)
+	hugePayload := strings.Repeat("A", 600*1024)
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("POST", "/api/telemetry/push", strings.NewReader(hugePayload))
+	req.Header.Set("X-Renology-Token", "secret123")
+	server.httpServer.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest && rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("Expected 400 or 413 for oversized body, got %d", rec.Code)
+	}
 }
 

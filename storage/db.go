@@ -19,8 +19,10 @@ import (
 const schemaSQL = `
 PRAGMA journal_mode = WAL;
 PRAGMA synchronous = NORMAL;
-PRAGMA cache_size = -2000;
+PRAGMA cache_size = -16000;
 PRAGMA busy_timeout = 5000;
+PRAGMA temp_store = MEMORY;
+PRAGMA mmap_size = 268435456;
 
 CREATE TABLE IF NOT EXISTS telemetry (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -53,7 +55,6 @@ CREATE TABLE IF NOT EXISTS telemetry (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_telemetry_timestamp ON telemetry(timestamp);
-CREATE INDEX IF NOT EXISTS idx_telemetry_mac ON telemetry(mac_address);
 
 CREATE TABLE IF NOT EXISTS rf_survey (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -71,14 +72,15 @@ CREATE INDEX IF NOT EXISTS idx_rf_timestamp ON rf_survey(timestamp);
 // initDB opens or creates the SQLite database, configures WAL mode, runs schema migrations,
 // and auto-imports legacy JSONL and CSV records.
 func (s *Storage) initDB() error {
-	db, err := sql.Open("sqlite", s.dbPath)
+	dsn := fmt.Sprintf("file:%s?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=cache_size(-16000)&_pragma=temp_store(MEMORY)&_pragma=mmap_size(268435456)", s.dbPath)
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return fmt.Errorf("failed to open sqlite database %s: %w", s.dbPath, err)
 	}
 
-	// Connection pool tuning for low memory & embedded use
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
+	// Allow concurrent readers in WAL mode while preserving low footprint
+	db.SetMaxOpenConns(4)
+	db.SetMaxIdleConns(4)
 	db.SetConnMaxLifetime(0)
 
 	// Execute schema

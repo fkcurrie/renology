@@ -13,6 +13,15 @@ import (
 
 // GetLatest reads and returns the latest telemetry snapshot.
 func (s *Storage) GetLatest() (*models.Telemetry, error) {
+	s.mu.RLock()
+	cached := s.cachedLatest
+	s.mu.RUnlock()
+
+	if cached != nil {
+		cpy := *cached
+		return &cpy, nil
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -24,6 +33,7 @@ func (s *Storage) GetLatest() (*models.Telemetry, error) {
 	if err := json.Unmarshal(data, &t); err != nil {
 		return nil, err
 	}
+	s.cachedLatest = &t
 	return &t, nil
 }
 
@@ -205,6 +215,9 @@ func (s *Storage) readAllTelemetryRecords() []models.Telemetry {
 
 // buildTimeSeries generates a downsampled history curve for a given duration and bucket interval from telemetry records.
 func buildTimeSeries(records []models.Telemetry, startWindow time.Time, now time.Time, bucketDuration time.Duration, timeFormat string) []models.HistoryPoint24h {
+	if bucketDuration <= 0 {
+		return nil
+	}
 	numBuckets := int(now.Sub(startWindow) / bucketDuration)
 	if numBuckets <= 0 {
 		return nil
@@ -224,7 +237,7 @@ func buildTimeSeries(records []models.Telemetry, startWindow time.Time, now time
 		sumBattVolt  float64
 	}
 
-	buckets := make(map[int]*bucketData)
+	buckets := make([]bucketData, numBuckets)
 
 	for _, r := range records {
 		if r.Timestamp.Before(startWindow) || r.Timestamp.After(now) {
@@ -239,11 +252,7 @@ func buildTimeSeries(records []models.Telemetry, startWindow time.Time, now time
 			idx = numBuckets - 1
 		}
 
-		b, ok := buckets[idx]
-		if !ok {
-			b = &bucketData{}
-			buckets[idx] = b
-		}
+		b := &buckets[idx]
 		b.count++
 		b.sumWatts += r.PVPower
 		battWatts := r.BatteryPower
@@ -259,8 +268,9 @@ func buildTimeSeries(records []models.Telemetry, startWindow time.Time, now time
 	for i := 0; i < numBuckets; i++ {
 		tBucket := startWindow.Add(time.Duration(i) * bucketDuration)
 		timeLabel := tBucket.Format(timeFormat)
+		b := buckets[i]
 
-		if b, ok := buckets[i]; ok && b.count > 0 {
+		if b.count > 0 {
 			points = append(points, models.HistoryPoint24h{
 				Timestamp:      tBucket,
 				TimeLabel:      timeLabel,
@@ -495,6 +505,9 @@ func (s *Storage) GetRecentTelemetry(minutes int, referenceTime time.Time) (*mod
 
 	if minutes <= 0 {
 		minutes = 60
+	}
+	if minutes > 1440 {
+		minutes = 1440
 	}
 	if referenceTime.IsZero() {
 		referenceTime = time.Now()

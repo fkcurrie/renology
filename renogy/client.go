@@ -145,25 +145,38 @@ func (c *Client) Start(ctx context.Context) error {
 // scanForDevice looks for the target device by MAC address or Renogy name prefix.
 func (c *Client) scanForDevice(ctx context.Context, timeout time.Duration) (bluetooth.ScanResult, error) {
 	foundChan := make(chan bluetooth.ScanResult, 1)
+	scanErrChan := make(chan error, 1)
 
-	err := c.adapter.Scan(func(ad *bluetooth.Adapter, result bluetooth.ScanResult) {
-		mac := result.Address.String()
-		if strings.EqualFold(mac, c.config.TargetMAC) || strings.HasPrefix(result.LocalName(), "BT-TH-") {
-			_ = ad.StopScan()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	// BlueZ adapter.Scan() is synchronous and blocking; run it in a worker goroutine
+	go func() {
+		err := c.adapter.Scan(func(ad *bluetooth.Adapter, result bluetooth.ScanResult) {
+			mac := result.Address.String()
+			if strings.EqualFold(mac, c.config.TargetMAC) || strings.HasPrefix(result.LocalName(), "BT-TH-") {
+				_ = ad.StopScan()
+				select {
+				case foundChan <- result:
+				default:
+				}
+			}
+		})
+		if err != nil {
 			select {
-			case foundChan <- result:
+			case scanErrChan <- err:
 			default:
 			}
 		}
-	})
-	if err != nil {
-		return bluetooth.ScanResult{}, fmt.Errorf("adapter scan: %w", err)
-	}
+	}()
 
 	select {
 	case res := <-foundChan:
+		_ = c.adapter.StopScan()
 		return res, nil
-	case <-time.After(timeout):
+	case err := <-scanErrChan:
+		return bluetooth.ScanResult{}, fmt.Errorf("adapter scan error: %w", err)
+	case <-timer.C:
 		_ = c.adapter.StopScan()
 		return bluetooth.ScanResult{}, fmt.Errorf("timeout waiting for device advertisement")
 	case <-ctx.Done():
@@ -174,9 +187,6 @@ func (c *Client) scanForDevice(ctx context.Context, timeout time.Duration) (blue
 
 // connectAndSetup connects to the peripheral, discovers services, and sets up GATT.
 func (c *Client) connectAndSetup(addr bluetooth.Address) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	var device bluetooth.Device
 	var err error
 	for attempt := 1; attempt <= 2; attempt++ {
@@ -191,15 +201,15 @@ func (c *Client) connectAndSetup(addr bluetooth.Address) error {
 	if err != nil {
 		return fmt.Errorf("connect: %w", err)
 	}
-	c.device = &device
 
 	services, err := device.DiscoverServices(nil)
 	if err != nil {
-		device.Disconnect()
+		_ = device.Disconnect()
 		return fmt.Errorf("discover services: %w", err)
 	}
 
 	var writeFound, notifyFound bool
+	var writeChar, notifyChar bluetooth.DeviceCharacteristic
 
 	for _, s := range services {
 		sUUID := strings.ToLower(s.UUID().String())
@@ -212,8 +222,7 @@ func (c *Client) connectAndSetup(addr bluetooth.Address) error {
 			cUUID := strings.ToLower(ch.UUID().String())
 			// Write characteristic: must be 0000ffd1 under 0000ffd0
 			if sUUID == UUIDServiceWrite && (cUUID == UUIDCharWrite || strings.HasPrefix(cUUID, "0000ffd1")) {
-				chCopy := ch
-				c.writeChar = &chCopy
+				writeChar = ch
 				writeFound = true
 				if c.config.Verbose {
 					log.Printf("[Renogy] Found Write characteristic: %s in service %s", cUUID, sUUID)
@@ -221,8 +230,7 @@ func (c *Client) connectAndSetup(addr bluetooth.Address) error {
 			}
 			// Notify characteristic: must be 0000fff1 under 0000fff0
 			if sUUID == UUIDServiceRead && (cUUID == UUIDCharNotify || strings.HasPrefix(cUUID, "0000fff1")) {
-				chCopy := ch
-				c.notifyChar = &chCopy
+				notifyChar = ch
 				notifyFound = true
 				if c.config.Verbose {
 					log.Printf("[Renogy] Found Notify characteristic: %s in service %s", cUUID, sUUID)
@@ -232,20 +240,29 @@ func (c *Client) connectAndSetup(addr bluetooth.Address) error {
 	}
 
 	if !writeFound || !notifyFound {
-		device.Disconnect()
+		_ = device.Disconnect()
 		return fmt.Errorf("missing required characteristics (writeFound=%v, notifyFound=%v)", writeFound, notifyFound)
 	}
 
 	// Enable notifications on RX characteristic
-	err = c.notifyChar.EnableNotifications(func(buf []byte) {
+	err = notifyChar.EnableNotifications(func(buf []byte) {
 		c.handleIncomingChunk(buf)
 	})
 	if err != nil {
-		device.Disconnect()
+		_ = device.Disconnect()
 		return fmt.Errorf("enable notifications: %w", err)
 	}
 
+	// Commit state under short-lived lock
+	c.mu.Lock()
+	c.device = &device
+	c.writeChar = &writeChar
+	c.notifyChar = &notifyChar
+	c.chunkBuffer = c.chunkBuffer[:0]
+	c.expectedLen = 0
 	c.isConnected = true
+	c.mu.Unlock()
+
 	return nil
 }
 
@@ -262,11 +279,22 @@ func (c *Client) handleIncomingChunk(chunk []byte) {
 		log.Printf("[Renogy] RX Chunk (%d bytes): %X", len(chunk), chunk)
 	}
 
+	// Memory guard: reset buffer if corrupted garbage exceeds 512 bytes
+	if len(c.chunkBuffer) > 512 {
+		c.chunkBuffer = c.chunkBuffer[:0]
+		c.expectedLen = 0
+	}
+
 	c.chunkBuffer = append(c.chunkBuffer, chunk...)
 
-	// Scan buffer for DeviceID preamble to discard any framing garbage or noise
-	for len(c.chunkBuffer) > 0 && c.chunkBuffer[0] != c.config.DeviceID {
-		c.chunkBuffer = c.chunkBuffer[1:]
+	// Scan buffer for DeviceID preamble to discard any framing garbage or noise via in-place shift
+	startIdx := 0
+	for startIdx < len(c.chunkBuffer) && c.chunkBuffer[startIdx] != c.config.DeviceID {
+		startIdx++
+	}
+	if startIdx > 0 {
+		copy(c.chunkBuffer, c.chunkBuffer[startIdx:])
+		c.chunkBuffer = c.chunkBuffer[:len(c.chunkBuffer)-startIdx]
 	}
 
 	if len(c.chunkBuffer) >= 3 && c.expectedLen == 0 {
@@ -277,6 +305,11 @@ func (c *Client) handleIncomingChunk(chunk []byte) {
 		} else {
 			// Normal Modbus RTU Response: [DeviceID, FuncCode, ByteCount, Data..., CRCLo, CRCHi]
 			byteCount := int(c.chunkBuffer[2])
+			if byteCount > 250 { // Cap to valid Modbus RTU payload
+				c.chunkBuffer = c.chunkBuffer[:0]
+				c.expectedLen = 0
+				return
+			}
 			c.expectedLen = byteCount + 5
 		}
 	}
@@ -284,7 +317,14 @@ func (c *Client) handleIncomingChunk(chunk []byte) {
 	if c.expectedLen > 0 && len(c.chunkBuffer) >= c.expectedLen {
 		frame := make([]byte, c.expectedLen)
 		copy(frame, c.chunkBuffer[:c.expectedLen])
-		c.chunkBuffer = c.chunkBuffer[c.expectedLen:]
+
+		rem := len(c.chunkBuffer) - c.expectedLen
+		if rem > 0 {
+			copy(c.chunkBuffer, c.chunkBuffer[c.expectedLen:])
+			c.chunkBuffer = c.chunkBuffer[:rem]
+		} else {
+			c.chunkBuffer = c.chunkBuffer[:0]
+		}
 		c.expectedLen = 0
 
 		select {
@@ -325,6 +365,9 @@ func (c *Client) sendModbusQuery(ctx context.Context, startReg, numRegs uint16, 
 		return nil, fmt.Errorf("write characteristic: %w", err)
 	}
 
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
 	select {
 	case resp := <-c.respChan:
 		if !modbus.ValidateCRC(resp) {
@@ -334,20 +377,25 @@ func (c *Client) sendModbusQuery(ctx context.Context, startReg, numRegs uint16, 
 			log.Printf("[Renogy] RX Response: %X", resp)
 		}
 		return resp, nil
-	case <-time.After(timeout):
+	case <-timer.C:
 		return nil, fmt.Errorf("timed out waiting for response")
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
 }
 
-// pollLoop performs periodic polling every PollInterval.
+// pollLoop performs periodic polling every PollInterval with tolerance for transient errors.
 func (c *Client) pollLoop(ctx context.Context, deviceName, mac string, rssi int) error {
 	ticker := time.NewTicker(c.config.PollInterval)
 	defer ticker.Stop()
 
 	// Initial query immediately upon connection
-	c.pollOnce(ctx, deviceName, mac, rssi)
+	if err := c.pollOnce(ctx, deviceName, mac, rssi); err != nil {
+		log.Printf("[Renogy] Warning: initial poll failed: %v", err)
+	}
+
+	consecutiveFailures := 0
+	const maxConsecutiveFailures = 3
 
 	for {
 		select {
@@ -355,7 +403,13 @@ func (c *Client) pollLoop(ctx context.Context, deviceName, mac string, rssi int)
 			return nil
 		case <-ticker.C:
 			if err := c.pollOnce(ctx, deviceName, mac, rssi); err != nil {
-				return err
+				consecutiveFailures++
+				log.Printf("[Renogy] Poll failure (%d/%d): %v", consecutiveFailures, maxConsecutiveFailures, err)
+				if consecutiveFailures >= maxConsecutiveFailures {
+					return fmt.Errorf("exceeded %d consecutive poll failures: %w", maxConsecutiveFailures, err)
+				}
+			} else {
+				consecutiveFailures = 0
 			}
 		}
 	}
@@ -465,13 +519,26 @@ func (c *Client) printTelemetrySummary(t *models.Telemetry) {
 func (c *Client) Disconnect() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	if c.notifyChar != nil {
+		_ = c.notifyChar.EnableNotifications(nil)
+		c.notifyChar = nil
+	}
+
 	if c.device != nil {
 		_ = c.device.Disconnect()
 		c.device = nil
 	}
+
 	c.writeChar = nil
-	c.notifyChar = nil
 	c.isConnected = false
+	c.chunkBuffer = c.chunkBuffer[:0]
+	c.expectedLen = 0
+
+	// Drain any pending responses
+	for len(c.respChan) > 0 {
+		<-c.respChan
+	}
 }
 
 // LatestTelemetry returns the most recently received telemetry snapshot.

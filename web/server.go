@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"crypto/subtle"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -71,18 +72,31 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		// Set caching headers for static assets
 		if strings.HasSuffix(r.URL.Path, ".css") {
 			w.Header().Set("Content-Type", "text/css; charset=utf-8")
+			w.Header().Set("Cache-Control", "public, max-age=3600")
 		} else if strings.HasSuffix(r.URL.Path, ".js") {
 			w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+			w.Header().Set("Cache-Control", "public, max-age=3600")
 		}
 		fileServer.ServeHTTP(w, r)
 	})
 
+	// Security middleware wrapping all incoming HTTP requests
+	secureHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "SAMEORIGIN")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' http://localhost:* http://127.0.0.1:* https://*.run.app")
+		mux.ServeHTTP(w, r)
+	})
+
 	s.httpServer = &http.Server{
-		Addr:         cfg.ListenAddr,
-		Handler:      mux,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:              cfg.ListenAddr,
+		Handler:           secureHandler,
+		ReadHeaderTimeout: 3 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    64 * 1024,
 	}
 
 	return s, nil
@@ -186,6 +200,9 @@ func (s *Server) handleRecentHistory(w http.ResponseWriter, r *http.Request) {
 	minutes := 60
 	if mStr := r.URL.Query().Get("minutes"); mStr != "" {
 		if m, err := strconv.Atoi(mStr); err == nil && m > 0 {
+			if m > 1440 {
+				m = 1440
+			}
 			minutes = m
 		}
 	}
@@ -225,6 +242,9 @@ func (s *Server) handleWeather(w http.ResponseWriter, r *http.Request) {
 
 	client := http.Client{
 		Timeout: 2 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
 	}
 
 	resp, err := client.Get("http://127.0.0.1:8088/api/weather/current")
@@ -241,7 +261,7 @@ func (s *Server) handleWeather(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 	if err != nil {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"error","error":"failed to read weather response","measurements":{}}`))
@@ -262,18 +282,21 @@ func (s *Server) handlePushTelemetry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate authorization token if configured
-	if s.config.CloudToken != "" {
+	// Validate authorization token if configured or in CloudRelay mode
+	if s.config.CloudToken != "" || s.config.CloudRelay {
 		token := r.Header.Get("X-Renology-Token")
 		if token == "" {
 			authHeader := r.Header.Get("Authorization")
 			token = strings.TrimPrefix(authHeader, "Bearer ")
 		}
-		if token != s.config.CloudToken {
+		if s.config.CloudToken == "" || subtle.ConstantTimeCompare([]byte(token), []byte(s.config.CloudToken)) != 1 {
 			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 			return
 		}
 	}
+
+	// Bound request body to 512KB to protect against memory exhaustion DoS
+	r.Body = http.MaxBytesReader(w, r.Body, 512*1024)
 
 	var payload models.CloudSyncPayload
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
