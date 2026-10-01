@@ -50,9 +50,12 @@
   // Battery Card
   const elGaugeSoc = document.getElementById('gaugeSocVal');
   const elGaugeSub = document.getElementById('gaugeStatusSub');
+  const elGaugeCapacitySub = document.getElementById('gaugeCapacitySub');
   const elBattV = document.getElementById('battVoltageVal');
   const elBattA = document.getElementById('battCurrentVal');
   const elBattW = document.getElementById('battPowerVal');
+  const elBattFreezeStatus = document.getElementById('battFreezeStatus');
+  const elBattHealthRating = document.getElementById('battHealthRating');
 
   // Speedometer & Solar Card
   const elSpeedoVolts = document.getElementById('speedoVoltsVal');
@@ -60,6 +63,8 @@
   const elPvV = document.getElementById('pvVoltageVal');
   const elPvA = document.getElementById('pvCurrentVal');
   const elPowerToday = document.getElementById('powerTodayVal');
+  const elPvPeakTodayVal = document.getElementById('pvPeakTodayVal');
+  const elChargingAhVal = document.getElementById('chargingAhVal');
   const elLifetimeKwh = document.getElementById('lifetimeKwhVal');
 
   // Solar Potential & Curtailment
@@ -69,22 +74,34 @@
   const elCurtailmentBarFill = document.getElementById('curtailmentBarFill');
   const elSunPotentialVal = document.getElementById('sunPotentialVal');
 
-  // System & Environment Card
+  // Cabin & Environment Card
   const elCtrlTemp = document.getElementById('ctrlTempVal');
   const elBattTemp = document.getElementById('battTempVal');
-  const elLoadStatus = document.getElementById('loadStatusVal');
+  const elCabinTempVal = document.getElementById('cabinTempVal');
+  const elCabinHumVal = document.getElementById('cabinHumVal');
   const elFaultCode = document.getElementById('faultCodeVal');
   const elRssi = document.getElementById('bleRssiVal');
   const elWeatherStatusBadge = document.getElementById('weatherStatusBadge');
   const elWeatherOutdoorTemp = document.getElementById('weatherOutdoorTemp');
   const elWeatherTempF = document.getElementById('weatherTempF');
-  const elWeatherHumidity = document.getElementById('weatherHumidity');
-  const elWeatherPressure = document.getElementById('weatherPressure');
-  const elWeatherWind = document.getElementById('weatherWind');
-  const elWeatherGust = document.getElementById('weatherGust');
   const elWeatherSolarRad = document.getElementById('weatherSolarRad');
-  const elWeatherUv = document.getElementById('weatherUv');
+  const elWeatherSolarFluxDesc = document.getElementById('weatherSolarFluxDesc');
+  const elWeatherRainVal = document.getElementById('weatherRainVal');
+  const elWeatherRainRate = document.getElementById('weatherRainRate');
+  const elDorsetDayLength = document.getElementById('dorsetDayLength');
+  const elDorsetSolarNoon = document.getElementById('dorsetSolarNoon');
   const elWeatherStationSub = document.getElementById('weatherStationSub');
+
+  // Voltworks 1000W Inverter & Autonomy Hub
+  const elAutonomyUsableWh = document.getElementById('autonomyUsableWh');
+  const elAutonomySocSub = document.getElementById('autonomySocSub');
+  const elRunStarlink = document.getElementById('runStarlink');
+  const elRunLaptop = document.getElementById('runLaptop');
+  const elRunFridge = document.getElementById('runFridge');
+  const elRunLights = document.getElementById('runLights');
+  const elRunStandby = document.getElementById('runStandby');
+  const elHeadroomText = document.getElementById('headroomText');
+  const elHeadroomBarFill = document.getElementById('headroomBarFill');
 
   // Controls & Charts
   const elFullscreenBtn = document.getElementById('fullscreenBtn');
@@ -2062,13 +2079,47 @@
         }
 
         if (elWeatherOutdoorTemp) elWeatherOutdoorTemp.innerHTML = `${m.outdoor_temperature_c}<span class="unit">°C</span>`;
-        if (elWeatherTempF) elWeatherTempF.textContent = `${m.outdoor_temperature_f || '--'}°F`;
-        if (elWeatherHumidity) elWeatherHumidity.innerHTML = `${m.outdoor_humidity_pct}<span class="unit">%</span>`;
-        if (elWeatherPressure) elWeatherPressure.textContent = `${m.pressure_relative_hpa || '--'} hPa`;
-        if (elWeatherWind) elWeatherWind.innerHTML = `${m.wind_speed_kmh || 0}<span class="unit">km/h</span>`;
-        if (elWeatherGust) elWeatherGust.textContent = `Gust: ${m.wind_gust_kmh || '--'} km/h (${m.wind_direction_deg || 0}°)`;
+        if (elWeatherTempF) {
+          const rhStr = m.outdoor_humidity_pct !== undefined ? ` • ${m.outdoor_humidity_pct}% RH` : '';
+          elWeatherTempF.textContent = `${m.outdoor_temperature_f || '--'}°F${rhStr}`;
+        }
+        if (elCabinTempVal && m.indoor_temperature_c !== undefined) {
+          elCabinTempVal.innerHTML = `${Number(m.indoor_temperature_c).toFixed(1)}<span class="unit">°C</span>`;
+        }
+        if (elCabinHumVal && m.indoor_humidity_pct !== undefined) {
+          elCabinHumVal.textContent = `${m.indoor_humidity_pct}% RH`;
+        }
         if (elWeatherSolarRad) elWeatherSolarRad.innerHTML = `${m.solar_radiation_wm2 || 0}<span class="unit">W/m²</span>`;
-        if (elWeatherUv) elWeatherUv.textContent = `UV: ${m.uv_index || 0} • Rain: ${m.daily_rain_mm || 0}mm`;
+        if (elWeatherSolarFluxDesc) {
+          const srad = Number(m.solar_radiation_wm2 || 0);
+          if (srad >= 600) elWeatherSolarFluxDesc.textContent = 'Peak Direct Sunlight';
+          else if (srad >= 200) elWeatherSolarFluxDesc.textContent = 'Moderate Sunlight';
+          else if (srad > 0) elWeatherSolarFluxDesc.textContent = 'Low Sun / Overcast';
+          else elWeatherSolarFluxDesc.textContent = 'Sun Below Horizon';
+        }
+        if (elWeatherRainVal) {
+          const rainMm = (m.daily_rain_mm !== undefined && m.daily_rain_mm !== null) ? Number(m.daily_rain_mm) : 0;
+          elWeatherRainVal.innerHTML = `${rainMm.toFixed(1)}<span class="unit">mm</span>`;
+        }
+        if (elWeatherRainRate) {
+          const rate = Number(m.rain_rate_mm_hr || 0);
+          const rainMm = Number(m.daily_rain_mm || 0);
+          if (rate > 0) {
+            elWeatherRainRate.textContent = `${rate.toFixed(1)} mm/h • Active Rain`;
+          } else if (rainMm > 0) {
+            elWeatherRainRate.textContent = `Overcast • Rain Earlier`;
+          } else {
+            elWeatherRainRate.textContent = `0.0 mm/h • Dry Skies`;
+          }
+        }
+        
+        // Update Dorset Ephemeris in Card 3
+        const ephem = getDorsetSunTimes(new Date());
+        if (ephem) {
+          if (elDorsetDayLength) elDorsetDayLength.textContent = ephem.day_length || '11h 48m';
+          if (elDorsetSolarNoon) elDorsetSolarNoon.textContent = `Noon: ${ephem.solar_noon_time || '13:05'} EDT`;
+        }
+
         if (elWeatherStationSub) elWeatherStationSub.textContent = `EasyWeather DD85 (${data.updated_at || 'synced'})`;
 
         if (lastTelemetry) {
@@ -2090,6 +2141,11 @@
         if (elHdrWeatherHum) elHdrWeatherHum.textContent = '--%';
         if (elHdrWeatherSolar) elHdrWeatherSolar.textContent = '-- W/m²';
         if (elWeatherStationSub) elWeatherStationSub.textContent = '192.168.0.163:8088';
+        const ephem = getDorsetSunTimes(new Date());
+        if (ephem) {
+          if (elDorsetDayLength) elDorsetDayLength.textContent = ephem.day_length || '11h 48m';
+          if (elDorsetSolarNoon) elDorsetSolarNoon.textContent = `Noon: ${ephem.solar_noon_time || '13:05'} EDT`;
+        }
       }
     } catch (err) {
       console.warn('Weather fetch error:', err);
@@ -2274,6 +2330,12 @@
       targetSOC = t.battery_soc_percent || 0;
       if (elGaugeSoc) elGaugeSoc.innerHTML = `${targetSOC}<span class="unit">%</span>`;
 
+      // 100Ah @ 12.8V Nominal LiFePO4 Battery = 1,280 Wh Total Capacity
+      const usableWh = Math.round((targetSOC / 100.0) * 1280);
+      if (elGaugeCapacitySub) {
+        elGaugeCapacitySub.textContent = `${usableWh.toLocaleString()} Wh Stored (100Ah)`;
+      }
+
       if (elGaugeSub) {
         if (targetSOC >= 98) {
           elGaugeSub.textContent = 'FULLY CHARGED';
@@ -2291,6 +2353,24 @@
       if (elBattA) elBattA.innerHTML = `${(t.battery_current_a || 0).toFixed(2)}<span class="unit">A</span>`;
       if (elBattW) elBattW.innerHTML = `${(t.battery_power_w || 0).toFixed(1)}<span class="unit">W</span>`;
 
+      // Battery Health & Cold-Weather Freeze Protection
+      const bTemp = t.battery_temp_c !== undefined ? t.battery_temp_c : 20;
+      if (elBattFreezeStatus) {
+        if (bTemp <= 0) {
+          elBattFreezeStatus.textContent = '❄️ FREEZE LOCKOUT (≤0°C)';
+          elBattFreezeStatus.className = 'freeze-warn-tag';
+        } else if (bTemp <= 4) {
+          elBattFreezeStatus.textContent = `⚠️ Cold Caution (${bTemp}°C)`;
+          elBattFreezeStatus.className = 'freeze-warn-tag';
+        } else {
+          elBattFreezeStatus.textContent = `🛡️ Freeze Safe (>0°C)`;
+          elBattFreezeStatus.className = 'safe-freeze-tag';
+        }
+      }
+      if (elBattHealthRating) {
+        elBattHealthRating.textContent = `HEALTH: 100% (${t.battery_type || 'LFP'})`;
+      }
+
       // Update Speedometer & Solar PV Metrics
       targetPvVolts = t.pv_voltage_v || 0;
       triggerNeedleAnimation();
@@ -2298,8 +2378,57 @@
       if (elPvV) elPvV.innerHTML = `${(t.pv_voltage_v || 0).toFixed(1)}<span class="unit">V</span>`;
       if (elPvA) elPvA.innerHTML = `${(t.pv_current_a || 0).toFixed(2)}<span class="unit">A</span>`;
       if (elPowerToday) elPowerToday.innerHTML = `${t.power_generation_today_wh || 0}<span class="unit">Wh</span>`;
+      
+      const peakW = t.max_charging_power_today_w || 0;
+      const chgAh = t.charging_ah_today || 0;
+      if (elPvPeakTodayVal) elPvPeakTodayVal.innerHTML = `${peakW}<span class="unit">W</span>`;
+      if (elChargingAhVal) elChargingAhVal.innerHTML = `${chgAh.toFixed(1)}<span class="unit">Ah</span>`;
+
       if (t.power_generation_total_kwh && elLifetimeKwh) {
         elLifetimeKwh.textContent = `${t.power_generation_total_kwh.toLocaleString()} kWh`;
+      }
+
+      // Update Voltworks 1000W Inverter & Autonomy Hub
+      if (elAutonomyUsableWh) elAutonomyUsableWh.textContent = `${usableWh.toLocaleString()} Wh`;
+      if (elAutonomySocSub) elAutonomySocSub.textContent = `100Ah LiFePO4 • ${targetSOC}% Full`;
+
+      function formatRuntime(hours) {
+        if (hours <= 0) return '0 hrs';
+        if (hours < 1) return `~${Math.round(hours * 60)} mins`;
+        if (hours >= 48) return `~${(hours / 24).toFixed(1)} Days`;
+        return `~${hours.toFixed(1)} hrs`;
+      }
+
+      // Tare consumption of the Voltworks 1000W Pure Sine Inverter (~8W idle)
+      const tareW = 8;
+      const starlinkH = usableWh > 0 ? (usableWh / (50 + tareW)) : 0;
+      const laptopH = usableWh > 0 ? (usableWh / (45 + tareW)) : 0;
+      const fridgeH = usableWh > 0 ? (usableWh / (35 + tareW)) : 0;
+      const lightsH = usableWh > 0 ? (usableWh / (15 + tareW)) : 0;
+      const standbyH = usableWh > 0 ? (usableWh / tareW) : 0;
+
+      if (elRunStarlink) elRunStarlink.textContent = formatRuntime(starlinkH);
+      if (elRunLaptop) elRunLaptop.textContent = formatRuntime(laptopH);
+      if (elRunFridge) elRunFridge.textContent = formatRuntime(fridgeH);
+      if (elRunLights) elRunLights.textContent = formatRuntime(lightsH);
+      if (elRunStandby) elRunStandby.textContent = formatRuntime(standbyH);
+
+      // Inverter Power Headroom (1000W Continuous / 2000W Surge)
+      const dischargeW = Math.max(0, -(Number(t.battery_power_w) || 0));
+      const headroomW = Math.max(0, 1000 - Math.round(dischargeW));
+      const headroomPct = Math.min(100, Math.max(0, Math.round((headroomW / 1000) * 100)));
+      if (elHeadroomText) {
+        elHeadroomText.textContent = `${headroomW}W Available (${headroomPct}%)`;
+      }
+      if (elHeadroomBarFill) {
+        elHeadroomBarFill.style.width = `${headroomPct}%`;
+        if (headroomPct < 20) {
+          elHeadroomBarFill.style.background = '#ef4444';
+        } else if (headroomPct < 50) {
+          elHeadroomBarFill.style.background = '#f59e0b';
+        } else {
+          elHeadroomBarFill.style.background = 'linear-gradient(90deg, #10b981, #06b6d4)';
+        }
       }
 
       // Update Solar Potential, Curtailment & Human Story Analytics
@@ -2315,10 +2444,6 @@
       // Update System Hardware
       if (elCtrlTemp) elCtrlTemp.textContent = `${t.controller_temp_c || 0}°C`;
       if (elBattTemp) elBattTemp.textContent = `${t.battery_temp_c || 0}°C`;
-      if (elLoadStatus) {
-        const isLoadOn = t.load_status === 'On' || (t.load_power_w && t.load_power_w > 0);
-        elLoadStatus.textContent = isLoadOn ? `Running (${t.load_power_w || 0}W)` : `Idle (0W)`;
-      }
 
       if (elFaultCode) {
         if (t.fault_code === 0) {

@@ -485,14 +485,24 @@ html, body {
 
 .gauge-center-readout {
   position: absolute;
-  bottom: 22px;
+  bottom: 26px;
   display: flex;
   flex-direction: column;
   align-items: center;
 }
 
+.gauge-capacity-sub {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  color: #94a3b8;
+  margin-bottom: 2px;
+  text-transform: uppercase;
+}
+
 .gauge-soc {
-  font-size: 44px;
+  font-size: 38px;
   font-weight: 900;
   font-family: var(--font-mono);
   color: #fff;
@@ -501,17 +511,39 @@ html, body {
 }
 
 .gauge-soc .unit {
-  font-size: 22px;
+  font-size: 20px;
   color: var(--accent-emerald);
   margin-left: 2px;
 }
 
 .gauge-status-sub {
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 1.5px;
   color: var(--accent-emerald);
-  margin-top: 4px;
+  margin-top: 3px;
+}
+
+.card-footer-sub {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 10px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.safe-freeze-tag {
+  color: #34d399;
+  font-weight: 600;
+}
+
+.freeze-warn-tag {
+  color: #ef4444;
+  font-weight: 700;
 }
 
 /* Metrics Row */
@@ -524,6 +556,12 @@ html, body {
   border-radius: 10px;
   padding: 10px;
   margin-top: auto;
+}
+
+.speedo-odometer-row {
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  padding: 8px 6px;
 }
 
 .metric-item {
@@ -890,9 +928,158 @@ html, body {
   border-top: 3px solid #f59e0b;
 }
 
-.chart-7d {
+.chart-7d, .inverter-card {
   grid-column: span 1;
-  border-top: 3px solid #06b6d4;
+  border-top: 3px solid #10b981;
+}
+
+/* Inverter & Autonomy Hub Styles */
+.inverter-icon {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+}
+
+.inverter-badge {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 600;
+}
+
+.autonomy-battery-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  border-radius: 8px;
+  padding: 4px 8px;
+  margin-bottom: 4px;
+  flex-shrink: 0;
+}
+
+.autonomy-banner-label {
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
+
+.autonomy-banner-wh {
+  font-size: 15px;
+  font-weight: 800;
+  font-family: var(--font-mono);
+  color: #38bdf8;
+  line-height: 1.1;
+  margin-top: 1px;
+  white-space: nowrap;
+}
+
+.autonomy-banner-right {
+  text-align: right;
+}
+
+.autonomy-subtag {
+  font-size: 9.5px;
+  font-weight: 600;
+  color: #cbd5e1;
+}
+
+.autonomy-table-container {
+  flex: 1 1 auto;
+  overflow-y: hidden;
+  margin-bottom: 2px;
+  min-height: 0;
+}
+
+.autonomy-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 9.5px;
+}
+
+.autonomy-table th {
+  font-size: 7.5px;
+  font-family: var(--font-mono);
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 1px 3px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  font-weight: 700;
+}
+
+.autonomy-table td {
+  padding: 1.5px 3px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  color: #e2e8f0;
+}
+
+.appliance-icon {
+  margin-right: 3px;
+}
+
+.load-badge {
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  color: #cbd5e1;
+}
+
+.runtime-val {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: #38bdf8;
+}
+
+.runtime-val.highlight-time {
+  color: #34d399;
+}
+
+.inverter-headroom-container {
+  background: rgba(15, 23, 42, 0.5);
+  border-radius: 6px;
+  padding: 3px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  flex-shrink: 0;
+  margin-top: auto;
+}
+
+.headroom-label-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 8.5px;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: #94a3b8;
+  margin-bottom: 3px;
+}
+
+.headroom-bar-bg {
+  height: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 3px;
+}
+
+.headroom-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #10b981, #06b6d4);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.headroom-subtext {
+  font-size: 8.5px;
+  color: #64748b;
+  text-align: center;
 }
 
 /* Timespan Selector & Segmented Control */
@@ -1074,7 +1261,7 @@ html, body {
   .chart-24h {
     grid-column: span 2;
   }
-  .chart-7d {
+  .chart-7d, .inverter-card {
     grid-column: span 1;
   }
   .gauge-wrapper, .speedometer-wrapper {
@@ -1109,7 +1296,7 @@ html, body {
   .chart-24h {
     grid-column: span 2;
   }
-  .chart-7d {
+  .chart-7d, .inverter-card {
     grid-column: span 1;
   }
   .gauge-wrapper {
@@ -1162,7 +1349,7 @@ html, body {
   .chart-24h {
     grid-column: span 2;
   }
-  .chart-7d {
+  .chart-7d, .inverter-card {
     grid-column: span 2;
   }
   .gauge-wrapper {
@@ -1307,7 +1494,7 @@ html, body {
     overflow: visible;
   }
 
-  .battery-card, .solar-card, .system-card, .chart-24h, .chart-7d {
+  .battery-card, .solar-card, .system-card, .chart-24h, .chart-7d, .inverter-card {
     grid-column: span 1 !important;
   }
 

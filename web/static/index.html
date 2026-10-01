@@ -76,6 +76,7 @@
         <div class="gauge-wrapper">
           <canvas id="fuelGaugeCanvas" width="340" height="240"></canvas>
           <div class="gauge-center-readout">
+            <div class="gauge-capacity-sub" id="gaugeCapacitySub">1,280 Wh Stored (100Ah)</div>
             <div class="gauge-soc" id="gaugeSocVal">100<span class="unit">%</span></div>
             <div class="gauge-status-sub" id="gaugeStatusSub">FULLY CHARGED</div>
           </div>
@@ -95,6 +96,11 @@
             <span class="metric-val" id="battPowerVal">0.0<span class="unit">W</span></span>
           </div>
         </div>
+
+        <div class="card-footer-sub" id="battHealthSub">
+          <span>FREEZE GUARD: <strong id="battFreezeStatus" class="safe-freeze-tag">🛡️ Freeze Safe (&gt;0°C)</strong></span>
+          <span id="battHealthRating">HEALTH: 100% (LFP)</span>
+        </div>
       </section>
 
       <!-- Card 2: Automotive Solar Panel Voltage Speedometer -->
@@ -110,7 +116,7 @@
           <canvas id="speedometerCanvas" width="340" height="240"></canvas>
           <div class="speedometer-center-readout">
             <div class="speedo-speed" id="speedoVoltsVal">36.1<span class="unit">V</span></div>
-            <div class="speedo-label">SUN PRESSURE (V)</div>
+            <div class="speedo-label">STRING VOLTAGE (V)</div>
           </div>
         </div>
 
@@ -138,17 +144,21 @@
             <span class="metric-val highlight-val" id="solarPowerVal">0<span class="unit">W</span></span>
           </div>
           <div class="metric-item">
-            <span class="metric-label">PANEL CURRENT</span>
-            <span class="metric-val" id="pvCurrentVal">0.00<span class="unit">A</span></span>
+            <span class="metric-label">TODAY PEAK</span>
+            <span class="metric-val" id="pvPeakTodayVal">0<span class="unit">W</span></span>
           </div>
           <div class="metric-item">
             <span class="metric-label">TODAY YIELD</span>
             <span class="metric-val" id="powerTodayVal">0<span class="unit">Wh</span></span>
           </div>
+          <div class="metric-item">
+            <span class="metric-label">ENERGY IN</span>
+            <span class="metric-val" id="chargingAhVal">0<span class="unit">Ah</span></span>
+          </div>
         </div>
 
         <div class="lifetime-row">
-          <span>LIFETIME: <strong id="lifetimeKwhVal">9,746 kWh</strong></span>
+          <span>ARRAY: <strong>2x 160W (320W Nom)</strong></span>
           <span class="speedo-redline-tag">SAFE RANGE (&lt;100V)</span>
         </div>
       </section>
@@ -157,7 +167,7 @@
       <section class="card system-card">
         <div class="card-header">
           <div class="card-icon system-icon">⛅</div>
-          <h2>SYSTEM & ENVIRONMENT</h2>
+          <h2>CABIN & ENVIRONMENT</h2>
           <span class="badge weather-badge" id="weatherStatusBadge">Station Standby</span>
         </div>
 
@@ -180,10 +190,11 @@
           </div>
 
           <div class="sys-stat-box">
-            <div class="stat-icon">💡</div>
+            <div class="stat-icon">🏠</div>
             <div class="stat-content">
-              <span class="stat-title">APPLIANCES (DC)</span>
-              <span class="stat-number" id="loadStatusVal">Idle (0W)</span>
+              <span class="stat-title">CABIN INDOOR</span>
+              <span class="stat-number" id="cabinTempVal">16.0<span class="unit">°C</span></span>
+              <span class="w-sub" id="cabinHumVal">74% RH</span>
             </div>
           </div>
 
@@ -201,22 +212,22 @@
           <div class="weather-box">
             <span class="w-label">OUTDOOR TEMP</span>
             <span class="w-val" id="weatherOutdoorTemp">--<span class="unit">°C</span></span>
-            <span class="w-sub" id="weatherTempF">--°F</span>
-          </div>
-          <div class="weather-box">
-            <span class="w-label">HUMIDITY</span>
-            <span class="w-val" id="weatherHumidity">--<span class="unit">%</span></span>
-            <span class="w-sub" id="weatherPressure">-- hPa</span>
-          </div>
-          <div class="weather-box">
-            <span class="w-label">WIND SPEED</span>
-            <span class="w-val" id="weatherWind">--<span class="unit">km/h</span></span>
-            <span class="w-sub" id="weatherGust">Gust: --</span>
+            <span class="w-sub" id="weatherTempF">--°F • --% RH</span>
           </div>
           <div class="weather-box highlight-solar">
             <span class="w-label">SOLAR IRRADIANCE</span>
             <span class="w-val" id="weatherSolarRad">--<span class="unit">W/m²</span></span>
-            <span class="w-sub" id="weatherUv">UV: --</span>
+            <span class="w-sub" id="weatherSolarFluxDesc">Direct Sunlight Flux</span>
+          </div>
+          <div class="weather-box">
+            <span class="w-label">RAINFALL TODAY</span>
+            <span class="w-val" id="weatherRainVal">0.0<span class="unit">mm</span></span>
+            <span class="w-sub" id="weatherRainRate">0.0 mm/h • Clear</span>
+          </div>
+          <div class="weather-box">
+            <span class="w-label">DAYLIGHT WINDOW</span>
+            <span class="w-val" id="dorsetDayLength">11h 48m</span>
+            <span class="w-sub" id="dorsetSolarNoon">Noon: ~13:05 EDT</span>
           </div>
         </div>
 
@@ -259,23 +270,75 @@
         </div>
       </section>
 
-      <!-- Card 5: Last 7 Days Solar Energy Graph -->
-      <section class="card chart-card chart-7d">
+      <!-- Card 5: Voltworks 1000W Inverter & Autonomy Hub -->
+      <section class="card chart-card inverter-card">
         <div class="card-header">
-          <div class="card-icon chart-icon">📊</div>
-          <h2>SOLAR ENERGY — LAST 7 DAYS</h2>
-          <span class="chart-summary-badge" id="total7dBadge">7-Day Total: 0 Wh</span>
+          <div class="card-icon inverter-icon">⚡</div>
+          <h2>VOLTWORKS 1000W INVERTER & AUTONOMY</h2>
+          <span class="badge inverter-badge">Pure Sine Wave</span>
         </div>
 
-        <div class="chart-container">
-          <canvas id="chart7dCanvas"></canvas>
-          <div class="chart-tooltip" id="tooltip7d"></div>
+        <!-- Battery Bank Stored Energy Banner -->
+        <div class="autonomy-battery-banner">
+          <div class="autonomy-banner-left">
+            <span class="autonomy-banner-label">USABLE BATTERY RESERVE</span>
+            <span class="autonomy-banner-wh" id="autonomyUsableWh">1,280 Wh</span>
+          </div>
+          <div class="autonomy-banner-right">
+            <span class="autonomy-subtag" id="autonomySocSub">100Ah LiFePO4 • 100% Full</span>
+          </div>
         </div>
 
-        <div class="chart-legend">
-          <span class="legend-item"><span class="legend-dot bar-dot"></span> Daily Energy Yield (Wh)</span>
-          <span class="legend-item"><span class="legend-dot peak-dot"></span> Daily Peak Power (W)</span>
-          <span class="legend-time">Past 7 Calendar Days</span>
+        <!-- Appliance Off-Grid Runtime Matrix -->
+        <div class="autonomy-table-container">
+          <table class="autonomy-table">
+            <thead>
+              <tr>
+                <th>APPLIANCE / LOAD</th>
+                <th class="text-center">DRAW</th>
+                <th class="text-right">EST. RUNTIME</th>
+              </tr>
+            </thead>
+            <tbody id="autonomyTableBody">
+              <tr>
+                <td><span class="appliance-icon">🛰️</span> Starlink (RV/Cabin)</td>
+                <td class="text-center"><span class="load-badge">50W</span></td>
+                <td class="text-right"><strong class="runtime-val" id="runStarlink">~24.5 hrs</strong></td>
+              </tr>
+              <tr>
+                <td><span class="appliance-icon">💻</span> Laptop & Phones</td>
+                <td class="text-center"><span class="load-badge">45W</span></td>
+                <td class="text-right"><strong class="runtime-val" id="runLaptop">~27.0 hrs</strong></td>
+              </tr>
+              <tr>
+                <td><span class="appliance-icon">🧊</span> 12V Cooler / Fridge</td>
+                <td class="text-center"><span class="load-badge">35W avg</span></td>
+                <td class="text-right"><strong class="runtime-val" id="runFridge">~34.0 hrs</strong></td>
+              </tr>
+              <tr>
+                <td><span class="appliance-icon">💡</span> Cabin LED Lighting</td>
+                <td class="text-center"><span class="load-badge">15W</span></td>
+                <td class="text-right"><strong class="runtime-val" id="runLights">~75.0 hrs</strong></td>
+              </tr>
+              <tr>
+                <td><span class="appliance-icon">⏱️</span> Inverter Standby (Tare)</td>
+                <td class="text-center"><span class="load-badge">8W</span></td>
+                <td class="text-right"><strong class="runtime-val highlight-time" id="runStandby">~6.0 Days</strong></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Inverter Power Headroom Bar -->
+        <div class="inverter-headroom-container">
+          <div class="headroom-label-row">
+            <span>INVERTER HEADROOM (1000W CONTINUOUS / 2000W SURGE)</span>
+            <span id="headroomText">1000W Available (100%)</span>
+          </div>
+          <div class="headroom-bar-bg">
+            <div class="headroom-bar-fill" id="headroomBarFill" style="width: 100%;"></div>
+          </div>
+          <div class="headroom-subtext">3x 120V AC Outlets • Starlink Compatible • CSA/UL Listed</div>
         </div>
       </section>
     </main>
