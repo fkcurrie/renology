@@ -59,8 +59,8 @@ func TestValidateCRCEdgeCases(t *testing.T) {
 		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 		0x00, 0x00, 0x00, 0x00, 0x00,
 	}
-	crc := CalculateCRC(validFrame)
-	validFrame = append(validFrame, byte(crc&0xFF), byte((crc>>8)&0xFF))
+	lo, hi := CRC16Modbus(validFrame)
+	validFrame = append(validFrame, lo, hi)
 
 	if !ValidateCRC(validFrame) {
 		t.Errorf("ValidateCRC on dynamically calculated frame expected true, got false")
