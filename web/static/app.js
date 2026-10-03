@@ -823,21 +823,19 @@
     ctx24h.stroke();
     ctx24h.setLineDash([]); // reset
 
-    // 4. Layer B: Solar Voltage Curve (Distinct Dashed Sky Blue #38bdf8 - Auxiliary Reference)
-    // Rendered with a high-contrast [8, 6] dash pattern so it is distinctly visible without competing with solid power curves
+    // 4. Layer B: Solar Voltage Curve (Vivid Sky Blue #38bdf8)
     ctx24h.save();
     ctx24h.beginPath();
-    ctx24h.setLineDash([8, 6]);
+    ctx24h.setLineDash([]);
     coords.forEach((pt, i) => {
       if (i === 0) ctx24h.moveTo(pt.x, pt.yVolt);
       else ctx24h.lineTo(pt.x, pt.yVolt);
     });
     ctx24h.strokeStyle = '#38bdf8';
-    ctx24h.lineWidth = 2.0;
+    ctx24h.lineWidth = 2.4;
     ctx24h.shadowColor = 'rgba(56, 189, 248, 0.45)';
-    ctx24h.shadowBlur = 4;
+    ctx24h.shadowBlur = 5;
     ctx24h.stroke();
-    ctx24h.setLineDash([]);
     ctx24h.restore();
 
     // 5. Layer C: Solar Power Area Fill (Warm Amber)
@@ -968,11 +966,11 @@
     }
 
     // =========================================================================
-    // LAYER E.3: PEAK SOLAR GENERATION REFERENCE LINE & HUD PILL BADGE
+    // LAYER E.3: PEAK REFERENCE LINE & HUD PILL BADGE (Touching Blue Curve at Peak)
     // =========================================================================
-    if (peakSolarW > 0 && maxW > 0) {
-      const clampedPeak = Math.min(peakSolarW, maxW);
-      const yPeak = padTop + plotH - (clampedPeak / maxW) * plotH;
+    if (peakSolarV > 0 && maxV > 0) {
+      const clampedPeak = Math.min(peakSolarV, maxV);
+      const yPeak = padTop + plotH - (clampedPeak / maxV) * plotH;
 
       // 1. Draw Dotted Red Peak Datum Line across chart
       ctx24h.save();
@@ -989,15 +987,16 @@
       ctx24h.restore();
 
       // 2. Format Badge Text per Timespan
-      let timespanTag = 'PEAK SOLAR';
-      if (mode === 'week') timespanTag = '7D PEAK SOLAR';
-      else if (mode === 'month') timespanTag = '30D PEAK SOLAR';
-      else if (mode === 'quarter') timespanTag = '90D PEAK SOLAR';
-      else if (mode === 'halfyear') timespanTag = '180D PEAK SOLAR';
-      else if (mode === 'year') timespanTag = '365D PEAK SOLAR';
-      else timespanTag = '24H PEAK SOLAR';
+      let timespanTag = 'PEAK';
+      if (mode === 'week') timespanTag = '7D PEAK';
+      else if (mode === 'month') timespanTag = '30D PEAK';
+      else if (mode === 'quarter') timespanTag = '90D PEAK';
+      else if (mode === 'halfyear') timespanTag = '180D PEAK';
+      else if (mode === 'year') timespanTag = '365D PEAK';
+      else timespanTag = '24H PEAK';
 
-      const badgeText = `▲ ${timespanTag}: ${Math.round(peakSolarW)}W`;
+      const valStr = peakSolarV % 1 === 0 ? peakSolarV.toFixed(0) : peakSolarV.toFixed(1);
+      const badgeText = `▲ ${timespanTag}: ${valStr}V`;
 
       // 3. Compute Pill Geometry
       ctx24h.save();
@@ -1397,11 +1396,11 @@
     }
     ctx24h.setLineDash([]);
 
-    // Dotted Red Horizontal Reference Line & HUD Pill Badge for Period Peak
-    const periodPeakSolarW = days.reduce((max, d) => Math.max(max, d.peak_solar_w || 0), 0);
-    if (periodPeakSolarW > 0 && maxPeakW > 0) {
-      const clampedPeriodPeak = Math.min(periodPeakSolarW, maxPeakW);
-      const yPeak = padTop + plotH - (clampedPeriodPeak / maxPeakW) * plotH;
+    // Dotted Red Horizontal Reference Line & HUD Pill Badge for Period Peak (Touching Cyan/Blue Yield Curve at Peak)
+    const periodPeakWh = days.reduce((max, d) => Math.max(max, d.energy_wh ?? d.total_energy_wh ?? 0), 0);
+    if (periodPeakWh > 0 && maxWh > 0) {
+      const clampedPeriodPeak = Math.min(periodPeakWh, maxWh);
+      const yPeak = padTop + plotH - (clampedPeriodPeak / maxWh) * plotH;
 
       ctx24h.save();
       ctx24h.beginPath();
@@ -1415,14 +1414,14 @@
       ctx24h.stroke();
       ctx24h.setLineDash([]);
 
-      let spanTag = 'PEAK SOLAR';
-      if (mode === 'week') spanTag = '7D PEAK SOLAR';
-      else if (mode === 'month') spanTag = '30D PEAK SOLAR';
-      else if (mode === 'quarter') spanTag = '90D PEAK SOLAR';
-      else if (mode === 'halfyear') spanTag = '180D PEAK SOLAR';
-      else if (mode === 'year') spanTag = '365D PEAK SOLAR';
+      let spanTag = 'PEAK';
+      if (mode === 'week') spanTag = '7D PEAK';
+      else if (mode === 'month') spanTag = '30D PEAK';
+      else if (mode === 'quarter') spanTag = '90D PEAK';
+      else if (mode === 'halfyear') spanTag = '180D PEAK';
+      else if (mode === 'year') spanTag = '365D PEAK';
 
-      const peakTag = `▲ ${spanTag}: ${Math.round(periodPeakSolarW)}W`;
+      const peakTag = `▲ ${spanTag}: ${Math.round(periodPeakWh)}Wh`;
       ctx24h.font = 'bold 10px var(--font-mono, monospace)';
       const textMetrics = ctx24h.measureText(peakTag);
       const pillW = Math.round(textMetrics.width + 16);
@@ -2081,11 +2080,11 @@
     }
     ctx7d.setLineDash([]);
 
-    // Dotted Red Horizontal Reference Line & HUD Pill Badge for 7D Period Peak
-    const periodPeak7dW = days.reduce((max, d) => Math.max(max, d.peak_solar_w || 0), 0);
-    if (periodPeak7dW > 0 && maxPeakW > 0) {
-      const clamped7dPeak = Math.min(periodPeak7dW, maxPeakW);
-      const yPeak = padTop + plotH - (clamped7dPeak / maxPeakW) * plotH;
+    // Dotted Red Horizontal Reference Line & HUD Pill Badge for 7D Period Peak (Touching Cyan/Blue Yield Curve at Peak)
+    const periodPeak7dWh = days.reduce((max, d) => Math.max(max, d.energy_wh ?? d.total_energy_wh ?? 0), 0);
+    if (periodPeak7dWh > 0 && maxWh > 0) {
+      const clamped7dPeak = Math.min(periodPeak7dWh, maxWh);
+      const yPeak = padTop + plotH - (clamped7dPeak / maxWh) * plotH;
 
       ctx7d.save();
       ctx7d.beginPath();
@@ -2099,7 +2098,7 @@
       ctx7d.stroke();
       ctx7d.setLineDash([]);
 
-      const peakTag = `▲ 7D PEAK SOLAR: ${Math.round(periodPeak7dW)}W`;
+      const peakTag = `▲ 7D PEAK: ${Math.round(periodPeak7dWh)}Wh`;
       ctx7d.font = 'bold 10px var(--font-mono, monospace)';
       const textMetrics = ctx7d.measureText(peakTag);
       const pillW = Math.round(textMetrics.width + 16);
