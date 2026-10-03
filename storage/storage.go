@@ -26,9 +26,10 @@ type Storage struct {
 	csvHeaderSet bool
 	rfSurveyPath      string
 	rfHeaderSet       bool
-	cachedLatest      *models.Telemetry
-	cachedHistory     *models.HistoryResponse
-	cachedHistoryTime time.Time
+	cachedLatest          *models.Telemetry
+	cachedHistory         *models.HistoryResponse
+	cachedHistoryTime     time.Time
+	cachedLongHistoryTime time.Time
 }
 
 // NewStorage initializes storage files and SQLite database in the specified directory.

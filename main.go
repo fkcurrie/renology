@@ -112,6 +112,15 @@ func main() {
 
 	var wg sync.WaitGroup
 
+	// Pre-warm history cache in background so first HTTP request returns instantly
+	if store != nil {
+		go func() {
+			if _, err := store.GetHistory(time.Now()); err == nil {
+				log.Println("[Storage] Historical telemetry cache pre-warmed successfully.")
+			}
+		}()
+	}
+
 	// 1. Start embedded Kiosk Web Server if configured
 	if *httpAddr != "" {
 		webServer, err := web.NewServer(web.ServerConfig{

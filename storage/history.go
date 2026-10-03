@@ -39,45 +39,85 @@ func (s *Storage) GetLatest() (*models.Telemetry, error) {
 
 // GetHistory parses recorded telemetry and produces multi-timespan historical series (24h, 7d, 30d, 90d, 180d, 365d, 12m).
 func (s *Storage) GetHistory(referenceTime time.Time) (*models.HistoryResponse, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if referenceTime.IsZero() {
 		referenceTime = time.Now()
 	}
 
-	// 0. Return cached history if fresh within 10 seconds
-	if s.cachedHistory != nil && referenceTime.Sub(s.cachedHistoryTime) < 10*time.Second && referenceTime.Sub(s.cachedHistoryTime) >= 0 {
+	// 0. Fast-path: return cached history under RLock if fresh within 45 seconds
+	s.mu.RLock()
+	if s.cachedHistory != nil && referenceTime.Sub(s.cachedHistoryTime) < 45*time.Second && referenceTime.Sub(s.cachedHistoryTime) >= 0 {
+		cached := s.cachedHistory
+		s.mu.RUnlock()
+		return cached, nil
+	}
+	s.mu.RUnlock()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Double check under write lock
+	if s.cachedHistory != nil && referenceTime.Sub(s.cachedHistoryTime) < 45*time.Second && referenceTime.Sub(s.cachedHistoryTime) >= 0 {
 		return s.cachedHistory, nil
 	}
 
-	var records []models.Telemetry
-	// 1. Try querying indexed SQLite database for past 8 days to cover 24h & 7d (15m buckets)
-	if s.db != nil {
-		startWindow := referenceTime.Add(-8 * 24 * time.Hour)
-		endWindow := referenceTime.Add(1 * time.Hour)
-		if sqlRecords, err := s.queryTelemetryRange(startWindow, endWindow); err == nil && len(sqlRecords) > 0 {
-			records = sqlRecords
-		}
-	}
-
-	// 2. Fallback to JSONL file if database was empty or not ready
-	if len(records) == 0 {
-		records = s.readAllTelemetryRecords()
-	}
-
-	// 3. Query daily aggregates from SQLite for the past 366 days
+	var points24h []models.HistoryPoint24h
+	var points7d []models.HistoryPoint24h
+	var points30d []models.HistoryPoint24h
+	var points90d []models.HistoryPoint24h
+	var points180d []models.HistoryPoint24h
+	var points365d []models.HistoryPoint24h
 	dailyMap := make(map[string]models.DailySummaryRecord)
+
 	if s.db != nil {
+		// Fast SQLite indexed bucket queries — avoids scanning 100,000 raw rows!
+		points24h = s.buildBucketedSeriesFromDB(referenceTime.Add(-24*time.Hour), referenceTime, 15*time.Minute, "15:04")
+		points7d = s.buildBucketedSeriesFromDB(referenceTime.Add(-7*24*time.Hour), referenceTime, 15*time.Minute, "Mon 15:04")
+
 		start365 := referenceTime.AddDate(-1, 0, -2)
 		endNow := referenceTime.Add(24 * time.Hour)
 		if m, err := s.queryDailyAggregates(start365, endNow); err == nil && len(m) > 0 {
 			dailyMap = m
 		}
-	}
 
-	// If dailyMap is empty and we have raw records, populate from records
-	if len(dailyMap) == 0 && len(records) > 0 {
+		// Recompute 30d, 90d, 180d, 365d only if older than 10 minutes (or on cold start)
+		if s.cachedHistory != nil && len(s.cachedHistory.Points30d) > 0 && referenceTime.Sub(s.cachedLongHistoryTime) < 10*time.Minute {
+			points30d = s.cachedHistory.Points30d
+			points90d = s.cachedHistory.Points90d
+			points180d = s.cachedHistory.Points180d
+			points365d = s.cachedHistory.Points365d
+		} else {
+			start30d := referenceTime.Add(-30 * 24 * time.Hour)
+			points30d = s.buildBucketedSeriesFromDB(start30d, referenceTime, 3*time.Hour, "Jan 02 15:04")
+
+			start90d := referenceTime.Add(-90 * 24 * time.Hour)
+			points90d = s.buildBucketedSeriesFromDB(start90d, referenceTime, 6*time.Hour, "Jan 02 15:04")
+
+			start180d := referenceTime.Add(-180 * 24 * time.Hour)
+			points180d = s.buildBucketedSeriesFromDB(start180d, referenceTime, 12*time.Hour, "Jan 02 15:04")
+
+			start365d := referenceTime.Add(-365 * 24 * time.Hour)
+			points365d = s.buildBucketedSeriesFromDB(start365d, referenceTime, 24*time.Hour, "Jan 02")
+
+			s.cachedLongHistoryTime = referenceTime
+		}
+	} else {
+		// Fallback to JSONL file if database was empty or not ready
+		records := s.readAllTelemetryRecords()
+		points24h = s.build24hSeries(records, referenceTime)
+		points7d = s.build7dSeriesPoints(records, referenceTime)
+
+		start30d := referenceTime.Add(-30 * 24 * time.Hour)
+		points30d = buildTimeSeries(records, start30d, referenceTime, 3*time.Hour, "Jan 02 15:04")
+
+		start90d := referenceTime.Add(-90 * 24 * time.Hour)
+		points90d = buildTimeSeries(records, start90d, referenceTime, 6*time.Hour, "Jan 02 15:04")
+
+		start180d := referenceTime.Add(-180 * 24 * time.Hour)
+		points180d = buildTimeSeries(records, start180d, referenceTime, 12*time.Hour, "Jan 02 15:04")
+
+		start365d := referenceTime.Add(-365 * 24 * time.Hour)
+		points365d = buildTimeSeries(records, start365d, referenceTime, 24*time.Hour, "Jan 02")
+
 		for _, r := range records {
 			dStr := r.Timestamp.Format("2006-01-02")
 			existing, ok := dailyMap[dStr]
@@ -99,49 +139,6 @@ func (s *Storage) GetHistory(referenceTime time.Time) (*models.HistoryResponse, 
 			existing.AvgBatterySOC = r.BatterySOC
 			dailyMap[dStr] = existing
 		}
-	}
-
-	// 4. Build Continuous Time-Series Series with Dynamic Bucket Averages
-	// Today (24h): 15-minute buckets (96 points)
-	points24h := s.build24hSeries(records, referenceTime)
-
-	// Week (7d): 15-minute buckets (672 points)
-	points7d := s.build7dSeriesPoints(records, referenceTime)
-
-	// Month (30d): 3-hour buckets (240 points)
-	start30d := referenceTime.Add(-30 * 24 * time.Hour)
-	var points30d []models.HistoryPoint24h
-	if s.db != nil {
-		points30d = s.buildBucketedSeriesFromDB(start30d, referenceTime, 3*time.Hour, "Jan 02 15:04")
-	} else {
-		points30d = buildTimeSeries(records, start30d, referenceTime, 3*time.Hour, "Jan 02 15:04")
-	}
-
-	// Quarter (90d): 6-hour buckets (360 points)
-	start90d := referenceTime.Add(-90 * 24 * time.Hour)
-	var points90d []models.HistoryPoint24h
-	if s.db != nil {
-		points90d = s.buildBucketedSeriesFromDB(start90d, referenceTime, 6*time.Hour, "Jan 02 15:04")
-	} else {
-		points90d = buildTimeSeries(records, start90d, referenceTime, 6*time.Hour, "Jan 02 15:04")
-	}
-
-	// Half Year (180d): 12-hour buckets (360 points)
-	start180d := referenceTime.Add(-180 * 24 * time.Hour)
-	var points180d []models.HistoryPoint24h
-	if s.db != nil {
-		points180d = s.buildBucketedSeriesFromDB(start180d, referenceTime, 12*time.Hour, "Jan 02 15:04")
-	} else {
-		points180d = buildTimeSeries(records, start180d, referenceTime, 12*time.Hour, "Jan 02 15:04")
-	}
-
-	// Whole Year (365d): 24-hour buckets (365 points)
-	start365d := referenceTime.Add(-365 * 24 * time.Hour)
-	var points365d []models.HistoryPoint24h
-	if s.db != nil {
-		points365d = s.buildBucketedSeriesFromDB(start365d, referenceTime, 24*time.Hour, "Jan 02")
-	} else {
-		points365d = buildTimeSeries(records, start365d, referenceTime, 24*time.Hour, "Jan 02")
 	}
 
 	// 5. Build Multi-Timespan Daily Summaries (for Card 5 & backwards-compat)

@@ -823,19 +823,19 @@
     ctx24h.stroke();
     ctx24h.setLineDash([]); // reset
 
-    // 4. Layer B: Solar Voltage Curve (Dashed Sky Blue #38bdf8 - Auxiliary Reference)
-    // Rendered with a distinctive dashed pattern so it is never confused with solid power lines
+    // 4. Layer B: Solar Voltage Curve (Distinct Dashed Sky Blue #38bdf8 - Auxiliary Reference)
+    // Rendered with a high-contrast [8, 6] dash pattern so it is distinctly visible without competing with solid power curves
     ctx24h.save();
     ctx24h.beginPath();
-    ctx24h.setLineDash([6, 4]);
+    ctx24h.setLineDash([8, 6]);
     coords.forEach((pt, i) => {
       if (i === 0) ctx24h.moveTo(pt.x, pt.yVolt);
       else ctx24h.lineTo(pt.x, pt.yVolt);
     });
-    ctx24h.strokeStyle = 'rgba(56, 189, 248, 0.85)';
-    ctx24h.lineWidth = 1.6;
-    ctx24h.shadowColor = 'rgba(56, 189, 248, 0.3)';
-    ctx24h.shadowBlur = 3;
+    ctx24h.strokeStyle = '#38bdf8';
+    ctx24h.lineWidth = 2.0;
+    ctx24h.shadowColor = 'rgba(56, 189, 248, 0.45)';
+    ctx24h.shadowBlur = 4;
     ctx24h.stroke();
     ctx24h.setLineDash([]);
     ctx24h.restore();
@@ -2709,10 +2709,13 @@
     }
   }
 
-  async function fetchHistory() {
+  async function fetchHistory(retryCount = 0) {
     try {
       const resp = await fetch('/api/history');
-      if (!resp.ok) return;
+      if (!resp.ok) {
+        if (retryCount < 3) setTimeout(() => fetchHistory(retryCount + 1), 2000);
+        return;
+      }
       historyData = await resp.json();
 
       renderHistoryTimespanChart();
@@ -2721,6 +2724,7 @@
       }
     } catch (err) {
       console.warn('History poll error:', err);
+      if (retryCount < 3) setTimeout(() => fetchHistory(retryCount + 1), 2000);
     }
   }
 
