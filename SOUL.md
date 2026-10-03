@@ -31,6 +31,22 @@ Renology stores telemetry simultaneously across three decoupled formats:
 1. **`renology_telemetry.jsonl`**: Append-only JSON Lines time-series ledger for long-term historical analysis and parsing.
 2. **`latest_status.json`**: Atomically written live snapshot allowing any third-party daemon, web server, or script to instantly read the current state without file locking collisions.
 3. **`renology_history.csv`**: Universal tabular spreadsheet format compatible with Excel, pandas, and data science tooling.
+4. **`renology.db`**: High-performance embedded SQLite database in WAL (Write-Ahead Logging) mode, with time-indexed telemetry buckets and downsampling aggregations for 24h, 7d, 30d, 90d, 180d, and 365d historical analytics.
+
+### 2.4 Hybrid Edge & Cloud Architecture
+Renology embraces a decoupled edge-and-cloud architecture designed for remote resilience:
+- **Physical Edge (Microsoft Surface Go 2)**: 100% offline-capable, fanless edge appliance running Linux Mint 22. Communicates directly with Renogy hardware over BLE GATT, persists local telemetry in SQLite WAL, and hosts an embedded full-screen automotive kiosk at `http://localhost:8080`.
+- **Cloud Relay (Google Cloud Run)**: Serverless, zero-maintenance public cloud dashboard running on Google Cloud Run (`solaria-solar` / `https://renology-952659886764.us-central1.run.app`). The physical edge pushes authenticated telemetry snapshots every 5 seconds over TLS via `RENOLOGY_CLOUD_TOKEN`. This provides global remote access to live telemetry and historical trends without exposing inbound firewall ports or relying on static public IPs at the remote cabin or RV.
+
+### 2.5 Human-Machine Interface (HMI) Philosophy
+The dashboard is engineered for high visibility, zero glare, and rapid glanceability:
+- **Dark Automotive Aesthetic**: High-contrast, anti-glare dark palette (`#0b0f19` canvas, `#111827` panels) tailored for 24/7 kiosk operation on the Surface Go 2 display in bright sunlight and dark cabin nights.
+- **Physical Dial & Speedometer**: Analog-style 270° automotive fuel gauge representing the 100Ah (1,280 Wh) LiFePO4 battery tank and a 180° solar power speedometer tracking the 320W dual-panel array (up to 100V string voltage).
+- **Voltworks 1000W Inverter Autonomy**: Real-time modeling of continuous off-grid loads (Starlink at 50W, laptop/phones at 45W, 12V cooler at 35W, cabin lighting at 15W, and 8W tare standby) against battery reserve and solar input.
+- **Diurnal Solar Context & Peak Generation**:
+  - Dorset, Ontario solar ephemeris: Official NOAA astronomical calculation rendering vertical amber/orange datum lines for sunrise and sunset.
+  - Peak generation reference lines: Dotted red horizontal reference lines (`#ef4444`) with right-docked HUD pill badges (`▲ 24H PEAK`, `▲ 7D PEAK`, `▲ 30D PEAK`) that dynamically zero-suppress overnight.
+- **EasyWeather Ambient Weather Integration**: Embedded real-time feed from a local HP3500Pro weather station displaying outdoor/indoor temperature, humidity, solar radiation ($W/m^2$), and barometric pressure.
 
 ---
 
@@ -64,32 +80,40 @@ Queries are transmitted as raw Modbus RTU frames over GATT characteristic `0xFFD
 
 ```mermaid
 flowchart TD
-    P1["Phase 1 (Complete): Core Go Modbus Engine & 5s Poller"] --> P2["Phase 2 (Immediate): BLE Link Hardening & System Integration"]
-    P2 --> P3["Phase 3: Embedded Web Dashboard & REST/WebSocket API"]
-    P3 --> P4["Phase 4: MQTT Exporter & Home Assistant Autodiscovery"]
-    P4 --> P5["Phase 5: Multi-Device Daisy Chain & Smart Shunt Support"]
+    P1["Phase 1 (Complete): Core Go Modbus Engine & 5s Poller"] --> P2["Phase 2 (Complete): BLE Link Hardening & System Integration"]
+    P2 --> P3["Phase 3 (Complete): Surface Go 2 Kiosk & Embedded Web Engine"]
+    P3 --> P4["Phase 4 (Complete): Cloud Run Relay & Global Dashboard"]
+    P4 --> P5["Phase 5: Native MQTT Exporter & Home Assistant Autodiscovery"]
+    P5 --> P6["Phase 6: Multi-Device Daisy Chain & Smart Shunt Support"]
 ```
 
-### Phase 1: Core Engine & Resilient Poller (Current)
+### Phase 1: Core Engine & Resilient Poller (Complete)
 - Complete Modbus RTU packet builder, parser, and CRC-16 validator.
 - Autonomous polling loop targeting 5-second intervals.
-- Concurrent file storage engine (`.jsonl`, `.csv`, `latest.json`).
-- Unit test suite covering frame construction, error handling, and math precision.
+- Concurrent file storage engine (`.jsonl`, `.csv`, `latest.json`, `renology.db`).
+- Comprehensive unit test suite covering frame construction, error handling, and math precision.
 
-### Phase 2: BLE Link Hardening & System Resilience
+### Phase 2: BLE Link Hardening & System Resilience (Complete)
 - Tuned Linux BlueZ connection supervision timeouts for extreme fringe signals (-100 dBm).
-- Passive scan fallback to capture advertised battery telemetry when link layer synchronization fails.
+- Non-blocking asynchronous BLE scanner preventing D-Bus thread deadlocks.
 - Prevention of local subsystem locks (BlueZ auto-connect conflicts, Blueman interference).
-- Linux systemd service configuration for non-root execution.
+- Linux systemd user services for unprivileged, autonomous operation.
 
-### Phase 3: Embedded Web Dashboard
-- Lightweight embedded HTTP server in Go with zero external dependencies.
-- WebSocket live feed streaming battery voltage, solar power, and charging state every 5 seconds.
-- Clean, high-contrast, mobile-friendly responsive dashboard (dark mode solar gauge).
+### Phase 3: Surface Go 2 Kiosk & Embedded Web Engine (Complete)
+- Embedded HTTP REST API in pure Go with zero external runtime dependencies (`//go:embed static/*`).
+- High-contrast automotive dark UI with analog battery fuel dial, solar speedometer, and multi-horizon canvas charts.
+- Dorset, Ontario solar ephemeris datum lines, peak generation indicators, and Voltworks 1000W inverter modeling.
+- Fullscreen Firefox kiosk integration on Linux Mint / Surface Go 2 screen.
 
-### Phase 4: Integrations & Extensibility
+### Phase 4: Cloud Run Relay & Global Remote Dashboard (Complete)
+- Dockerized container deployment on Google Cloud Run (`solaria-solar` / `renology`).
+- Secure edge-to-cloud telemetry sync via authenticated HTTP POST (`RENOLOGY_CLOUD_TOKEN`).
+- Zero-inbound-port cloud access to live dashboard, historical aggregations, and local weather.
+
+### Phase 5: Integrations & Extensibility (Upcoming)
 - Native MQTT publisher compatible with Home Assistant MQTT discovery.
 - Prometheus `/metrics` exposition for Grafana dashboards.
+- Multi-controller daisy chain support and external smart shunt ingestion.
 
 ---
 

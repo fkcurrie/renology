@@ -11,13 +11,22 @@
 - **Maintainer**: `fcurrie` (`fkcurrie`)
 - **Default Target Device**: `BT-TH-66F984D6` (MAC: `60:98:66:F9:84:D6`, OUI: Texas Instruments)
 - **Target Hardware**: Renogy Rover / Wanderer / Adventurer Solar Charge Controllers via BT-1 / BT-2 BLE dongles.
+- **Physical Edge Host**: Microsoft Surface Go 2 (fanless Intel Core m3-8100Y, 8GB RAM, Linux Mint 22, X11 `2400x1600` display).
+- **Public Cloud Hub**: Google Cloud Run (`solaria-solar` / `https://renology-952659886764.us-central1.run.app`, custom domain `solar.sfle.ca`).
+- **Power & Inverter Setup**:
+  - 100Ah LiFePO4 battery (~1,280 Wh storage capacity, 12V nominal).
+  - Dual 160W monocrystalline solar panels in series (~320W nominal, up to 100V string).
+  - Voltworks 1000W Pure Sine Wave Inverter 12V DC to 110V/120V AC (CETL/CSA listed, compatible with LiFePO4 battery and Starlink).
+  - HP3500Pro EasyWeather station at `192.168.0.163:8088`.
 
 ### Directory Structure
 ```
 /home/fcurrie/Projects/renology/
 ├── go.mod                     # Go module definition
 ├── go.sum                     # Cryptographic dependency checksums
-├── main.go                    # CLI entrypoint, argument parsing, OS signal handling
+├── main.go                    # CLI entrypoint, argument parsing, cloud pusher & OS signal handling
+├── Dockerfile                 # Multi-stage production container for Cloud Run relay
+├── .dockerignore              # Clean container build exclusions
 ├── models/
 │   ├── types.go               # Telemetry struct, charging states, battery profiles
 │   └── history.go             # 24h & 7d historical series and daily summary types
@@ -35,21 +44,22 @@
 │   ├── history.go             # 24h & 7d downsampling & diurnal aggregation
 │   └── history_test.go        # History engine unit tests
 ├── web/
-│   ├── server.go              # HTTP server, REST API (/api/status, /api/history, /api/weather)
+│   ├── server.go              # HTTP server, REST API (/api/status, /api/history, /api/weather, /api/telemetry/push)
 │   ├── server_test.go         # Web server unit test suite
 │   └── static/
-│       ├── index.html         # High-contrast solar kiosk UI
+│       ├── index.html         # High-contrast solar kiosk UI & Voltworks inverter card
 │       ├── style.css          # Anti-glare dark automotive theme
-│       └── app.js             # Automotive fuel dial canvas & 24h/7d charts
+│       └── app.js             # Automotive fuel dial canvas, solar speedometer, & 24h/7d charts
 ├── scripts/
+│   ├── deploy_cloud_run.sh    # Automated build & push pipeline to Google Cloud Run
 │   ├── mailer.py              # Pure Python 3 email engine (SMTP TLS 587/465 + Outbox queue)
 │   ├── sunset_reporter.py     # Sunset daily solar harvest & weather reporter to frank@sfle.ca
 │   ├── health_check.py        # Multi-pillar SRE health inspector (JSON & CLI triage)
 │   ├── troubleshooter.py      # Hourly autonomous watcher: self-healing + agy escalation
 │   └── test_suite.py          # Automated verification test suite
 ├── systemd/
-│   ├── renology.service       # Systemd user service for Renology poller & HTTP API
-│   ├── renology-kiosk.service # Systemd user service for Firefox fullscreen kiosk
+│   ├── renology.service       # Systemd user service for Renology poller, SQLite & HTTP API
+│   ├── renology-kiosk.service # Systemd user service for Firefox fullscreen kiosk on Surface Go 2
 │   ├── renology-sunset.service/timer # Daily sunset report dispatch timer
 │   └── renology-troubleshooter.service/timer # Hourly autonomous self-healing timer
 ├── start-kiosk.sh             # 1-click launcher for Linux Mint / Surface Go 2
@@ -82,7 +92,7 @@ go test -v -race ./...
 go build -o renology main.go
 ```
 
-### 2.2 Execution
+### 2.2 Execution (Local Edge)
 ```bash
 # Run daemon with poller and embedded kiosk web server (http://localhost:8080)
 ./renology -mac 60:98:66:F9:84:D6 -interval 5 -out ./data -http :8080
@@ -96,12 +106,42 @@ go build -o renology main.go
 # Run in web-only mode (inspect data without polling BLE)
 ./renology -web-only -http :8080
 
-# Run with custom parameters
+# Run with custom parameters and verbose BLE logging
 ./renology -mac 60:98:66:F9:84:D6 -interval 5 -out ./data -verbose
 
 # Inspect live data feeds
 tail -f ./data/renology_telemetry.jsonl
-cat ./data/latest_status.json | jq .
+cat ./data/latest_status.json | python3 -m json.tool
+```
+
+### 2.3 Cloud Run Deployment & Verification
+```bash
+# 1-step automated Cloud Run deployment script
+./scripts/deploy_cloud_run.sh
+
+# Or manual deployment using Google Cloud Build and Cloud Run
+gcloud builds submit --tag us-central1-docker.pkg.dev/solaria-solar/cloud-run-source-deploy/renology:latest . --project solaria-solar
+gcloud run deploy renology --image us-central1-docker.pkg.dev/solaria-solar/cloud-run-source-deploy/renology:latest --project solaria-solar --region us-central1 --allow-unauthenticated
+
+# Verify live deployment endpoints
+curl -s https://renology-952659886764.us-central1.run.app/api/status | python3 -m json.tool
+curl -s https://renology-952659886764.us-central1.run.app/api/weather | python3 -m json.tool
+```
+
+### 2.4 Surface Go 2 Kiosk Operations
+```bash
+# Inspect and manage local systemd user services
+systemctl --user status renology.service
+systemctl --user restart renology.service
+
+systemctl --user status renology-kiosk.service
+systemctl --user restart renology-kiosk.service
+
+# Capture remote screenshot of physical Surface screen (DISPLAY=:0)
+DISPLAY=:0 gnome-screenshot -f /tmp/surface_kiosk.png
+
+# Prevent screen sleeping & power blanking on Surface Go 2
+DISPLAY=:0 xset s off -dpms s noblank
 ```
 
 ---
@@ -210,7 +250,148 @@ The client buffers incoming bytes until `len(buffer) == byte_count + 5`, then va
 
 ---
 
-## 5. Coding & Contribution Standards
+## 5. Surface Go 2 Kiosk Operations & Systemd Runbook
+
+### 5.1 Hardware Profile & Environmental Constraints
+- **Hardware**: Microsoft Surface Go 2 (fanless Intel Core m3-8100Y, 8GB RAM, 128GB eMMC flash).
+- **Thermal & Fanless Operation**: Because the Surface Go 2 is completely fanless and operates 24/7 in a remote cabin environment, passive cooling is critical. The Renology Go poller and the Firefox kiosk browser are optimized to consume <2% CPU aggregate idle load. Heavy canvas redraws, unthrottled `requestAnimationFrame` loops, or high disk I/O must be avoided.
+- **eMMC Storage Wear Leveling**: SQLite operates in WAL (`renology.db-wal`) mode with `PRAGMA synchronous = NORMAL`. Data commits are batched and memory-cached to prevent premature flash memory wear.
+- **Display Resolution & Coordinates**: The physical 10.5" screen runs at 1920x1280, with Linux Mint Cinnamon X11 scaling resulting in an effective `2400x1600` canvas (`DISPLAY=:0`).
+
+### 5.2 Systemd User Services
+Renology runs as an unprivileged user daemon under systemd:
+
+1. **Poller & REST API Engine (`systemd/renology.service`)**:
+   ```ini
+   [Unit]
+   Description=Renology Solar BLE Poller, SQLite Engine & HTTP API
+   After=network.target bluetooth.target
+   Wants=bluetooth.target
+
+   [Service]
+   Type=simple
+   WorkingDirectory=%h/Projects/renology
+   EnvironmentFile=-%h/.config/renology/renology.env
+   ExecStart=%h/Projects/renology/renology -mac 60:98:66:F9:84:D6 -interval 5 -out ./data -http :8080
+   Restart=always
+   RestartSec=5
+   Nice=10
+
+   [Install]
+   WantedBy=default.target
+   ```
+
+2. **Firefox Fullscreen Kiosk (`systemd/renology-kiosk.service`)**:
+   ```ini
+   [Unit]
+   Description=Renology Surface Go 2 Fullscreen Kiosk Display
+   After=renology.service graphical-session.target
+   Wants=renology.service
+
+   [Service]
+   Type=simple
+   Environment=DISPLAY=:0
+   ExecStart=/usr/bin/firefox --kiosk http://localhost:8080
+   Restart=on-failure
+   RestartSec=8
+
+   [Install]
+   WantedBy=default.target
+   ```
+
+### 5.3 Screen Sleep, Blanking, and DPMS Suppression
+To keep the solar kiosk dashboard permanently visible on the Surface screen:
+```bash
+# Disable X11 screen saver and DPMS power-off
+DISPLAY=:0 xset s off
+DISPLAY=:0 xset -dpms
+DISPLAY=:0 xset s noblank
+```
+Under Cinnamon desktop settings, ensure AC power display sleep is set to **"Never"**.
+
+### 5.4 Remote Display Inspection & Testing
+For headless or remote maintenance over SSH:
+```bash
+# Capture full 2400x1600 Surface display
+DISPLAY=:0 gnome-screenshot -f /tmp/surface_kiosk.png
+
+# Synthetic touch/click coordinates for timespan tabs:
+# Today: (874, 1038) | Week: (1010, 1038) | Month: (1110, 1038) | Quarter: (1220, 1038)
+```
+
+---
+
+## 6. Google Cloud Run Dashboard & Relay Runbook
+
+### 6.1 Serverless Edge-to-Cloud Relay Pattern
+Off-grid solar installations are frequently situated behind mobile cellular hotspots (CGNAT) or Starlink terminals with no inbound port forwarding or static IPs. Renology overcomes this via an egress-only push architecture:
+- **Edge Pusher (`startCloudPusher()`)**: The Surface Go 2 poller spawns a background worker that pushes live JSON telemetry snapshots to Google Cloud Run every 5 seconds.
+- **Cloud Relay Engine (`-cloud-relay`)**: Cloud Run executes the Renology binary in relay mode, accepting inbound authenticated telemetry pushes on `/api/telemetry/push`, maintaining an embedded SQLite database, and serving the public kiosk UI globally.
+
+### 6.2 Cloud Infrastructure & Deployment
+- **Project ID**: `solaria-solar` (Project Number: `952659886764`)
+- **Region**: `us-central1`
+- **Service Name**: `renology`
+- **Live URL**: `https://renology-952659886764.us-central1.run.app` (Custom domain: `solar.sfle.ca`)
+- **Container Build Pipeline**:
+  ```bash
+  # Submit Dockerfile build to Cloud Build and push to Artifact Registry
+  gcloud builds submit --tag us-central1-docker.pkg.dev/solaria-solar/cloud-run-source-deploy/renology:latest . --project solaria-solar
+
+  # Deploy to Cloud Run with unauthenticated public read access
+  gcloud run deploy renology \
+    --image us-central1-docker.pkg.dev/solaria-solar/cloud-run-source-deploy/renology:latest \
+    --project solaria-solar \
+    --region us-central1 \
+    --allow-unauthenticated
+  ```
+  *(Or execute `./scripts/deploy_cloud_run.sh`)*.
+
+### 6.3 Security & Token Authentication
+- Telemetry push ingress (`/api/telemetry/push`) requires bearer token validation matching `RENOLOGY_CLOUD_TOKEN`.
+- The secret token is stored on the Surface Go 2 in `~/.config/renology/renology.env` (file permissions `0600`):
+  ```bash
+  RENOLOGY_CLOUD_URL=https://renology-952659886764.us-central1.run.app
+  RENOLOGY_CLOUD_TOKEN=<secret-token>
+  ```
+- Public read endpoints (`/`, `/api/status`, `/api/history`, `/api/weather`) remain open for low-latency family and operational monitoring on mobile phones and laptops.
+
+---
+
+## 7. Advanced Telemetry & Visual Features Reference
+
+### 7.1 Voltworks 1000W Inverter Autonomy Card
+- **Hardware**: Voltworks 1000W Continuous / 2000W Surge Pure Sine Wave Inverter 12V DC to 110V/120V AC (CETL/CSA listed, built-in UL fuses, compatible with LiFePO4 battery and Starlink).
+- **Usable Energy Reserve**: Calculated against 100Ah LiFePO4 nominal capacity ($100\text{ Ah} \times 12.8\text{V} \approx 1,280\text{ Wh}$).
+- **Dynamic Autonomy Projections**:
+  - Starlink (RV/Cabin): 50W (~24.5 hrs on full reserve)
+  - Laptop & Phones: 45W (~27.0 hrs)
+  - 12V Cooler / Portable Fridge: 35W avg (~34.0 hrs)
+  - Cabin LED Lighting: 15W (~75.0 hrs)
+  - Inverter Tare Standby: 8W (~6.0 days)
+- **Headroom Indicator**: Real-time progress bar tracking total inverter capacity headroom (1000W continuous rating).
+
+### 7.2 Dorset, Ontario Solar Ephemeris
+- **Coordinates**: `45.2444° N, 78.8956° W` (Dorset, Haliburton County, ON).
+- **Calculation**: Standard NOAA solar calculation implemented in `app.js` determines astronomical sunrise and sunset times based on the current calendar day.
+- **Visualization**: Vertical dashed datum lines (`#f59e0b` amber sunrise, `#f97316` orange sunset) with pinned timestamp badges on the 24H solar power canvas chart.
+
+### 7.3 Peak Solar Generation Reference Line & HUD Badges
+- **Reference Line**: Layer E.3 dotted red line (`#ef4444`, `[4, 4]` dash, 1.5px width, 5px blur glow) rendered horizontally at the exact peak generation level across:
+  - Daily ("Today" / 24H)
+  - Weekly ("Week" / 7D)
+  - Monthly ("Month" / 30D), Quarter (90D), Half Year (180D), Whole Year (365D)
+- **HUD Pill Badges**: Docked on the right canvas margin (`▲ 24H PEAK: <W>W`, `▲ 7D PEAK: <W>W`, `▲ 30D PEAK: <W>W`).
+- **Zero-Suppression**: During nighttime or before sunrise (when peak solar generation is 0W), the line and HUD badge are automatically hidden to avoid cluttering the baseline.
+
+### 7.4 EasyWeather HP3500Pro Station Ingestion
+- **Local Weather Station**: HP3500Pro / EasyWeather V1.6.5 at `192.168.0.163:8088`.
+- **Ingestion**: Reverse-proxied via `/api/weather` in `web/server.go`.
+- **Metrics**: Outdoor/indoor temperature, humidity, solar radiation ($W/m^2$), barometric pressure, rainfall rate, and wind speed.
+
+---
+
+## 8. Coding & Contribution Standards
 
 1. **Pure Go Implementation**: External tools and dependencies must be standard Go libraries. No Python wrappers or sidecar scripts.
 2. **Defensive Programming**:
