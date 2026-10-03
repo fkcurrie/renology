@@ -2,8 +2,8 @@
 # deploy_cloud_run.sh - One-command deployment for Renology Cloud Relay on Google Cloud Run
 set -euo pipefail
 
-PROJECT_ID="${GCP_PROJECT:-renology}"
-REGION="${GCP_REGION:-us-east1}"
+PROJECT_ID="${GCP_PROJECT:-solaria-solar}"
+REGION="${GCP_REGION:-us-central1}"
 SERVICE_NAME="${SERVICE_NAME:-renology}"
 DOMAIN="${CUSTOM_DOMAIN:-solar.sfle.ca}"
 
@@ -39,10 +39,16 @@ gcloud config set project "${PROJECT_ID}"
 echo "Enabling Cloud Run and Cloud Build APIs..."
 gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com
 
-# Deploy container directly from source
-echo "Building and deploying to Google Cloud Run..."
+# Build container image with Cloud Build and Dockerfile
+IMAGE_NAME="${REGION}-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/${SERVICE_NAME}:latest"
+echo "Submitting build to Google Cloud Build using Dockerfile..."
+gcloud builds submit --tag "${IMAGE_NAME}" . --project "${PROJECT_ID}"
+
+# Deploy container image to Cloud Run
+echo "Deploying to Google Cloud Run..."
 gcloud run deploy "${SERVICE_NAME}" \
-    --source . \
+    --image "${IMAGE_NAME}" \
+    --project "${PROJECT_ID}" \
     --region "${REGION}" \
     --allow-unauthenticated \
     --set-env-vars RENOLOGY_CLOUD_TOKEN="${SYNC_TOKEN}" \
