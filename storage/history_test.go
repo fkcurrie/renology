@@ -110,3 +110,113 @@ func TestGetHistoryAndLatest(t *testing.T) {
 	}
 }
 
+func TestBucketingPreservesPeakValuesOverTime(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "renology_peak_persist_test_*")
+	if err != nil {
+		t.Fatalf("MkdirTemp failed: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	s, err := NewStorage(tempDir)
+	if err != nil {
+		t.Fatalf("NewStorage failed: %v", err)
+	}
+
+	now := time.Date(2026, 9, 27, 12, 15, 0, 0, time.Local)
+
+	// Save one high peak record
+	peakRec := &models.Telemetry{
+		Timestamp:              now.Add(-10 * time.Minute),
+		DeviceName:             "BT-TH-66F984D6",
+		Model:                  "RNG-CTRL-RVR20",
+		BatterySOC:             100,
+		BatteryVoltage:         13.6,
+		PVVoltage:              44.4,
+		PVPower:                286,
+		ChargingStatus:         "MPPT",
+		PowerGenerationTodayWh: 500,
+	}
+	if err := s.Save(peakRec); err != nil {
+		t.Fatalf("Save peak error: %v", err)
+	}
+
+	// Save several zero or low records in the same bucket interval
+	for i := 1; i <= 5; i++ {
+		lowRec := &models.Telemetry{
+			Timestamp:              now.Add(time.Duration(-10+i) * time.Minute),
+			DeviceName:             "BT-TH-66F984D6",
+			Model:                  "RNG-CTRL-RVR20",
+			BatterySOC:             100,
+			BatteryVoltage:         13.2,
+			PVVoltage:              0.0,
+			PVPower:                0,
+			ChargingStatus:         "Deactivated",
+			PowerGenerationTodayWh: 500,
+		}
+		if err := s.Save(lowRec); err != nil {
+			t.Fatalf("Save low error: %v", err)
+		}
+	}
+
+	hist, err := s.GetHistory(now)
+	if err != nil {
+		t.Fatalf("GetHistory failed: %v", err)
+	}
+
+	// Find the max solar power and voltage across 24h, 7d, 30d, 365d points
+	findMaxPoints := func(pts []models.HistoryPoint24h) (int, float64) {
+		maxW := 0
+		maxV := 0.0
+		for _, p := range pts {
+			if p.SolarPowerW > maxW {
+				maxW = p.SolarPowerW
+			}
+			if p.PVVoltage > maxV {
+				maxV = p.PVVoltage
+			}
+		}
+		return maxW, maxV
+	}
+
+	w24, v24 := findMaxPoints(hist.Points24h)
+	if w24 != 286 || v24 != 44.4 {
+		t.Errorf("Points24h lost peak: got W=%d, V=%.1f, expected W=286, V=44.4", w24, v24)
+	}
+
+	w7, v7 := findMaxPoints(hist.Points7d)
+	if w7 != 286 || v7 != 44.4 {
+		t.Errorf("Points7d lost peak: got W=%d, V=%.1f, expected W=286, V=44.4", w7, v7)
+	}
+
+	w30, v30 := findMaxPoints(hist.Points30d)
+	if w30 != 286 || v30 != 44.4 {
+		t.Errorf("Points30d lost peak (averaged away): got W=%d, V=%.1f, expected W=286, V=44.4", w30, v30)
+	}
+
+	w365, v365 := findMaxPoints(hist.Points365d)
+	if w365 != 286 || v365 != 44.4 {
+		t.Errorf("Points365d lost peak (averaged away): got W=%d, V=%.1f, expected W=286, V=44.4", w365, v365)
+	}
+
+	// Also verify daily summaries preserved max_pv_v
+	if len(hist.Days7d) > 0 {
+		last7 := hist.Days7d[len(hist.Days7d)-1]
+		if last7.MaxPVVoltage != 44.4 {
+			t.Errorf("Days7d lost MaxPVVoltage: got %.1f, expected 44.4", last7.MaxPVVoltage)
+		}
+		if last7.PeakSolarWatts != 286 {
+			t.Errorf("Days7d lost PeakSolarWatts: got %d, expected 286", last7.PeakSolarWatts)
+		}
+	}
+	if len(hist.Days30d) > 0 {
+		last30 := hist.Days30d[len(hist.Days30d)-1]
+		if last30.MaxPVVoltage != 44.4 {
+			t.Errorf("Days30d lost MaxPVVoltage: got %.1f, expected 44.4", last30.MaxPVVoltage)
+		}
+		if last30.PeakSolarWatts != 286 {
+			t.Errorf("Days30d lost PeakSolarWatts: got %d, expected 286", last30.PeakSolarWatts)
+		}
+	}
+}
+
+

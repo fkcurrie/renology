@@ -159,6 +159,7 @@ func (s *Storage) GetHistory(referenceTime time.Time) (*models.HistoryResponse, 
 			EnergyWh:       r.EnergyWh,
 			EnergyKWh:      r.EnergyKWh,
 			AvgBatterySOC:  r.AvgBatterySOC,
+			MaxPVVoltage:   r.MaxPVVoltage,
 		}
 	}
 
@@ -228,8 +229,11 @@ func buildTimeSeries(records []models.Telemetry, startWindow time.Time, now time
 	type bucketData struct {
 		count        int
 		sumWatts     int
+		maxWatts     int
 		sumBattWatts float64
+		maxBattWatts float64
 		sumVolts     float64
+		maxVolts     float64
 		sumSOC       int
 		sumBattVolt  float64
 	}
@@ -252,12 +256,21 @@ func buildTimeSeries(records []models.Telemetry, startWindow time.Time, now time
 		b := &buckets[idx]
 		b.count++
 		b.sumWatts += r.PVPower
+		if r.PVPower > b.maxWatts {
+			b.maxWatts = r.PVPower
+		}
 		battWatts := r.BatteryPower
 		if battWatts == 0 && r.BatteryCurrent > 0 {
 			battWatts = r.BatteryVoltage * r.BatteryCurrent
 		}
 		b.sumBattWatts += battWatts
+		if battWatts > b.maxBattWatts {
+			b.maxBattWatts = battWatts
+		}
 		b.sumVolts += r.PVVoltage
+		if r.PVVoltage > b.maxVolts {
+			b.maxVolts = r.PVVoltage
+		}
 		b.sumSOC += r.BatterySOC
 		b.sumBattVolt += r.BatteryVoltage
 	}
@@ -271,9 +284,9 @@ func buildTimeSeries(records []models.Telemetry, startWindow time.Time, now time
 			points = append(points, models.HistoryPoint24h{
 				Timestamp:      tBucket,
 				TimeLabel:      timeLabel,
-				SolarPowerW:    b.sumWatts / b.count,
-				BatteryPowerW:  int(math.Round(b.sumBattWatts / float64(b.count))),
-				PVVoltage:      math.Round((b.sumVolts/float64(b.count))*10) / 10,
+				SolarPowerW:    b.maxWatts,
+				BatteryPowerW:  int(math.Round(b.maxBattWatts)),
+				PVVoltage:      math.Round(b.maxVolts*10) / 10,
 				BatterySOC:     b.sumSOC / b.count,
 				BatteryVoltage: math.Round((b.sumBattVolt/float64(b.count))*100) / 100,
 			})
@@ -325,10 +338,11 @@ func (s *Storage) buildBucketedSeriesFromDB(startWindow, now time.Time, bucketDu
 		bucketMap = make(map[int64]models.HistoryPoint24h)
 	}
 
+	endEpoch := (now.Unix() / bucketSec) * bucketSec
 	points := make([]models.HistoryPoint24h, numBuckets)
 	for i := 0; i < numBuckets; i++ {
-		tBucket := startWindow.Add(time.Duration(i) * bucketDuration)
-		bEpoch := (tBucket.Unix() / bucketSec) * bucketSec
+		bEpoch := endEpoch - int64(numBuckets-1-i)*bucketSec
+		tBucket := time.Unix(bEpoch, 0).In(now.Location())
 		timeLabel := tBucket.Format(timeFormat)
 
 		if p, ok := bucketMap[bEpoch]; ok {

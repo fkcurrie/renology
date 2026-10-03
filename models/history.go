@@ -21,6 +21,7 @@ type DailySummary7d struct {
 	EnergyWh       int     `json:"energy_wh"`       // Total daily energy generated (Wh)
 	EnergyKWh      float64 `json:"energy_kwh"`      // Total daily energy generated (kWh)
 	AvgBatterySOC  int     `json:"avg_battery_soc"` // Average battery SOC %
+	MaxPVVoltage   float64 `json:"max_pv_v"`        // Max solar volts recorded
 }
 
 // DailySummaryRecord represents a daily solar production record across multiple timespans.

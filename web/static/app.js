@@ -659,11 +659,84 @@
       }
     }
 
+    // Map peakSolarV to true Solar Voltage peak for the active period (so high values persist across downsampling)
+    let periodTruePeakSolarV = 0;
+    if (mode === 'today') {
+      if (historyData && historyData.days_7d) {
+        const todayRec = historyData.days_7d.find(d => d.day_label === 'Today' || (d.date && lastTelemetry && lastTelemetry.timestamp && d.date === lastTelemetry.timestamp.substring(0, 10)));
+        if (todayRec && todayRec.max_pv_v) periodTruePeakSolarV = Math.max(periodTruePeakSolarV, todayRec.max_pv_v);
+      }
+      if (lastTelemetry && lastTelemetry.pv_voltage_v) {
+        periodTruePeakSolarV = Math.max(periodTruePeakSolarV, lastTelemetry.pv_voltage_v);
+      }
+    } else if (mode === 'week') {
+      if (historyData && historyData.days_7d) {
+        periodTruePeakSolarV = historyData.days_7d.reduce((m, d) => Math.max(m, d.max_pv_v || 0), 0);
+      }
+    } else if (mode === 'month') {
+      if (historyData && historyData.days_30d) {
+        periodTruePeakSolarV = historyData.days_30d.reduce((m, d) => Math.max(m, d.max_pv_v || 0), 0);
+      }
+    } else if (mode === 'quarter') {
+      if (historyData && historyData.days_90d) {
+        periodTruePeakSolarV = historyData.days_90d.reduce((m, d) => Math.max(m, d.max_pv_v || 0), 0);
+      }
+    } else if (mode === 'halfyear') {
+      if (historyData && historyData.days_180d) {
+        periodTruePeakSolarV = historyData.days_180d.reduce((m, d) => Math.max(m, d.max_pv_v || 0), 0);
+      }
+    } else if (mode === 'year') {
+      if (historyData && historyData.days_365d) {
+        periodTruePeakSolarV = historyData.days_365d.reduce((m, d) => Math.max(m, d.max_pv_v || 0), 0);
+      }
+    }
+
+    if (periodTruePeakSolarV > peakSolarV) {
+      peakSolarV = periodTruePeakSolarV;
+    }
+
+    // Monotonic persistence guarantee: a broader timespan must never drop below a shorter nested timespan
+    if (historyData) {
+      if (mode === 'month' || mode === 'quarter' || mode === 'halfyear' || mode === 'year') {
+        if (historyData.days_7d) {
+          const wV = historyData.days_7d.reduce((m, d) => Math.max(m, d.max_pv_v || 0), 0);
+          const wW = historyData.days_7d.reduce((m, d) => Math.max(m, d.peak_solar_w || 0), 0);
+          if (wV > peakSolarV) peakSolarV = wV;
+          if (wW > peakSolarW) peakSolarW = wW;
+        }
+      }
+      if (mode === 'quarter' || mode === 'halfyear' || mode === 'year') {
+        if (historyData.days_30d) {
+          const mV = historyData.days_30d.reduce((m, d) => Math.max(m, d.max_pv_v || 0), 0);
+          const mW = historyData.days_30d.reduce((m, d) => Math.max(m, d.peak_solar_w || 0), 0);
+          if (mV > peakSolarV) peakSolarV = mV;
+          if (mW > peakSolarW) peakSolarW = mW;
+        }
+      }
+      if (mode === 'halfyear' || mode === 'year') {
+        if (historyData.days_90d) {
+          const qV = historyData.days_90d.reduce((m, d) => Math.max(m, d.max_pv_v || 0), 0);
+          const qW = historyData.days_90d.reduce((m, d) => Math.max(m, d.peak_solar_w || 0), 0);
+          if (qV > peakSolarV) peakSolarV = qV;
+          if (qW > peakSolarW) peakSolarW = qW;
+        }
+      }
+      if (mode === 'year') {
+        if (historyData.days_180d) {
+          const hV = historyData.days_180d.reduce((m, d) => Math.max(m, d.max_pv_v || 0), 0);
+          const hW = historyData.days_180d.reduce((m, d) => Math.max(m, d.peak_solar_w || 0), 0);
+          if (hV > peakSolarV) peakSolarV = hV;
+          if (hW > peakSolarW) peakSolarW = hW;
+        }
+      }
+    }
+
     if (periodTruePeakSolarW > peakSolarW) {
       peakSolarW = periodTruePeakSolarW;
     }
 
     if (peakSolarW > maxW) maxW = peakSolarW;
+    if (peakSolarV > maxV) maxV = peakSolarV;
     maxW = Math.ceil(maxW / 50) * 50;
     maxV = Math.ceil(maxV / 10) * 10;
     cachedMetrics24h = { padLeft, padRight, padTop, padBottom, plotW, plotH, maxW, maxV, w, h, mode };
@@ -1888,27 +1961,27 @@
 
     if (currentTimespan === 'today') {
       if (elHistoryChartTitle) elHistoryChartTitle.textContent = 'SOLAR POWER — TODAY (24H)';
-      if (elWindow24hLabel) elWindow24hLabel.textContent = '24-Hour Solar & Battery Flow (15m avg buckets)';
+      if (elWindow24hLabel) elWindow24hLabel.textContent = '24-Hour Solar & Battery Flow (15m peak buckets)';
       draw24hChart(historyData.points_24h || [], 'today');
     } else if (currentTimespan === 'week') {
       if (elHistoryChartTitle) elHistoryChartTitle.textContent = 'SOLAR POWER — PAST 7 DAYS';
-      if (elWindow24hLabel) elWindow24hLabel.textContent = 'Past 7 Days Continuous Flow (15m avg buckets)';
+      if (elWindow24hLabel) elWindow24hLabel.textContent = 'Past 7 Days Continuous Flow (15m peak buckets)';
       draw24hChart(historyData.points_7d || [], 'week');
     } else if (currentTimespan === 'month') {
       if (elHistoryChartTitle) elHistoryChartTitle.textContent = 'SOLAR POWER — PAST 30 DAYS';
-      if (elWindow24hLabel) elWindow24hLabel.textContent = 'Past 30 Days Continuous Flow (3h avg buckets)';
+      if (elWindow24hLabel) elWindow24hLabel.textContent = 'Past 30 Days Continuous Flow (3h peak buckets)';
       draw24hChart(historyData.points_30d || [], 'month');
     } else if (currentTimespan === 'quarter') {
       if (elHistoryChartTitle) elHistoryChartTitle.textContent = 'SOLAR POWER — PAST 90 DAYS (QUARTER)';
-      if (elWindow24hLabel) elWindow24hLabel.textContent = 'Past 90 Days Continuous Flow (6h avg buckets)';
+      if (elWindow24hLabel) elWindow24hLabel.textContent = 'Past 90 Days Continuous Flow (6h peak buckets)';
       draw24hChart(historyData.points_90d || [], 'quarter');
     } else if (currentTimespan === 'halfyear') {
       if (elHistoryChartTitle) elHistoryChartTitle.textContent = 'SOLAR POWER — PAST 6 MONTHS (HALF YEAR)';
-      if (elWindow24hLabel) elWindow24hLabel.textContent = 'Past 180 Days Continuous Flow (12h avg buckets)';
+      if (elWindow24hLabel) elWindow24hLabel.textContent = 'Past 180 Days Continuous Flow (12h peak buckets)';
       draw24hChart(historyData.points_180d || [], 'halfyear');
     } else if (currentTimespan === 'year') {
       if (elHistoryChartTitle) elHistoryChartTitle.textContent = 'SOLAR POWER — PAST 12 MONTHS (WHOLE YEAR)';
-      if (elWindow24hLabel) elWindow24hLabel.textContent = 'Past 365 Days Continuous Flow (24h avg buckets)';
+      if (elWindow24hLabel) elWindow24hLabel.textContent = 'Past 365 Days Continuous Flow (24h peak buckets)';
       draw24hChart(historyData.points_365d || [], 'year');
     }
   }

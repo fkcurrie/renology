@@ -275,9 +275,9 @@ func (s *Storage) queryTelemetryBuckets(start, end time.Time, bucketSeconds int)
 	query := `
 SELECT
     (strftime('%s', timestamp) / ?) * ? as b_epoch,
-    CAST(ROUND(AVG(pv_w)) AS INTEGER) as avg_pv_w,
-    CAST(ROUND(AVG(CASE WHEN battery_w > 0 THEN battery_w ELSE battery_v * battery_a END)) AS INTEGER) as avg_batt_w,
-    COALESCE(ROUND(AVG(pv_v), 1), 0.0) as avg_pv_v,
+    CAST(ROUND(MAX(pv_w)) AS INTEGER) as max_pv_w,
+    CAST(ROUND(MAX(CASE WHEN battery_w > 0 THEN battery_w ELSE battery_v * battery_a END)) AS INTEGER) as max_batt_w,
+    COALESCE(ROUND(MAX(pv_v), 1), 0.0) as max_pv_v,
     CAST(ROUND(AVG(battery_soc)) AS INTEGER) as avg_soc,
     COALESCE(ROUND(AVG(battery_v), 2), 0.0) as avg_batt_v
 FROM telemetry
