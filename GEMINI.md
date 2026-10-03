@@ -377,11 +377,11 @@ Off-grid solar installations are frequently situated behind mobile cellular hots
 - **Visualization**: Vertical dashed datum lines (`#f59e0b` amber sunrise, `#f97316` orange sunset) with pinned timestamp badges on the 24H solar power canvas chart.
 
 ### 7.3 Peak Solar Generation Reference Line & HUD Badges
-- **Reference Line**: Layer E.3 dotted red line (`#ef4444`, `[4, 4]` dash, 1.5px width, 5px blur glow) rendered horizontally at the exact peak generation level across:
+- **Reference Line**: Layer E.3 dotted red line (`#ef4444`, `[4, 4]` dash, 1.5px width, 5px blur glow) rendered horizontally at the exact peak Solar Power generation level (`peak_solar_w` / `max_charging_power_today_w`, mapped to true solar power generation rather than downsampled bucket averages) across:
   - Daily ("Today" / 24H)
   - Weekly ("Week" / 7D)
   - Monthly ("Month" / 30D), Quarter (90D), Half Year (180D), Whole Year (365D)
-- **HUD Pill Badges**: Docked on the right canvas margin (`▲ 24H PEAK: <W>W`, `▲ 7D PEAK: <W>W`, `▲ 30D PEAK: <W>W`).
+- **HUD Pill Badges**: Docked on the right canvas margin (`▲ 24H PEAK SOLAR: <W>W`, `▲ 7D PEAK SOLAR: <W>W`, `▲ 30D PEAK SOLAR: <W>W`).
 - **Zero-Suppression**: During nighttime or before sunrise (when peak solar generation is 0W), the line and HUD badge are automatically hidden to avoid cluttering the baseline.
 
 ### 7.4 EasyWeather HP3500Pro Station Ingestion

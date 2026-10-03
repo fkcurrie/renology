@@ -624,23 +624,63 @@
       if (pvV > maxV) maxV = pvV;
     });
 
+    // Map peakSolarW to true Solar Power generation for the active period (not bucketed average)
+    let periodTruePeakSolarW = 0;
+    if (mode === 'today') {
+      if (historyData && historyData.days_7d) {
+        const todayRec = historyData.days_7d.find(d => d.day_label === 'Today' || (d.date && lastTelemetry && lastTelemetry.timestamp && d.date === lastTelemetry.timestamp.substring(0, 10)));
+        if (todayRec && todayRec.peak_solar_w) periodTruePeakSolarW = Math.max(periodTruePeakSolarW, todayRec.peak_solar_w);
+      }
+      if (lastTelemetry) {
+        if (lastTelemetry.max_charging_power_today_w) periodTruePeakSolarW = Math.max(periodTruePeakSolarW, lastTelemetry.max_charging_power_today_w);
+        if (lastTelemetry.pv_power_w) periodTruePeakSolarW = Math.max(periodTruePeakSolarW, lastTelemetry.pv_power_w);
+      }
+    } else if (mode === 'week') {
+      if (historyData && historyData.days_7d) {
+        periodTruePeakSolarW = historyData.days_7d.reduce((m, d) => Math.max(m, d.peak_solar_w || 0), 0);
+      }
+    } else if (mode === 'month') {
+      if (historyData && historyData.days_30d) {
+        periodTruePeakSolarW = historyData.days_30d.reduce((m, d) => Math.max(m, d.peak_solar_w || 0), 0);
+      }
+    } else if (mode === 'quarter') {
+      if (historyData && historyData.days_90d) {
+        periodTruePeakSolarW = historyData.days_90d.reduce((m, d) => Math.max(m, d.peak_solar_w || 0), 0);
+      }
+    } else if (mode === 'halfyear') {
+      if (historyData && historyData.days_180d) {
+        periodTruePeakSolarW = historyData.days_180d.reduce((m, d) => Math.max(m, d.peak_solar_w || 0), 0);
+      }
+    } else if (mode === 'year') {
+      if (historyData && historyData.days_365d) {
+        periodTruePeakSolarW = historyData.days_365d.reduce((m, d) => Math.max(m, d.peak_solar_w || 0), 0);
+      } else if (historyData && historyData.months_12m) {
+        periodTruePeakSolarW = historyData.months_12m.reduce((m, d) => Math.max(m, d.peak_watts || 0), 0);
+      }
+    }
+
+    if (periodTruePeakSolarW > peakSolarW) {
+      peakSolarW = periodTruePeakSolarW;
+    }
+
+    if (peakSolarW > maxW) maxW = peakSolarW;
     maxW = Math.ceil(maxW / 50) * 50;
     maxV = Math.ceil(maxV / 10) * 10;
     cachedMetrics24h = { padLeft, padRight, padTop, padBottom, plotW, plotH, maxW, maxV, w, h, mode };
 
     if (elPeak24h) {
       if (mode === 'week') {
-        elPeak24h.textContent = `7d Peak: ${peakSolarW} W (15m avg) • Max Solar: ${peakSolarV.toFixed(1)} V`;
+        elPeak24h.textContent = `7d Peak Solar: ${peakSolarW} W • Max Solar: ${peakSolarV.toFixed(1)} V`;
       } else if (mode === 'month') {
-        elPeak24h.textContent = `30d Peak: ${peakSolarW} W (3h avg) • Max Solar: ${peakSolarV.toFixed(1)} V`;
+        elPeak24h.textContent = `30d Peak Solar: ${peakSolarW} W • Max Solar: ${peakSolarV.toFixed(1)} V`;
       } else if (mode === 'quarter') {
-        elPeak24h.textContent = `Quarter Peak: ${peakSolarW} W (6h avg) • Max Solar: ${peakSolarV.toFixed(1)} V`;
+        elPeak24h.textContent = `Quarter Peak Solar: ${peakSolarW} W • Max Solar: ${peakSolarV.toFixed(1)} V`;
       } else if (mode === 'halfyear') {
-        elPeak24h.textContent = `6-Month Peak: ${peakSolarW} W (12h avg) • Max Solar: ${peakSolarV.toFixed(1)} V`;
+        elPeak24h.textContent = `6-Month Peak Solar: ${peakSolarW} W • Max Solar: ${peakSolarV.toFixed(1)} V`;
       } else if (mode === 'year') {
-        elPeak24h.textContent = `1-Year Peak: ${peakSolarW} W (24h avg) • Max Solar: ${peakSolarV.toFixed(1)} V`;
+        elPeak24h.textContent = `1-Year Peak Solar: ${peakSolarW} W • Max Solar: ${peakSolarV.toFixed(1)} V`;
       } else {
-        elPeak24h.textContent = `24h Peak: ${peakSolarW} W (15m avg) • Max Solar: ${peakSolarV.toFixed(1)} V`;
+        elPeak24h.textContent = `24h Peak Solar: ${peakSolarW} W • Max Solar: ${peakSolarV.toFixed(1)} V`;
       }
     }
 
@@ -943,13 +983,13 @@
       ctx24h.restore();
 
       // 2. Format Badge Text per Timespan
-      let timespanTag = 'PEAK';
-      if (mode === 'week') timespanTag = '7D PEAK';
-      else if (mode === 'month') timespanTag = '30D PEAK';
-      else if (mode === 'quarter') timespanTag = '90D PEAK';
-      else if (mode === 'halfyear') timespanTag = '180D PEAK';
-      else if (mode === 'year') timespanTag = '365D PEAK';
-      else timespanTag = '24H PEAK';
+      let timespanTag = 'PEAK SOLAR';
+      if (mode === 'week') timespanTag = '7D PEAK SOLAR';
+      else if (mode === 'month') timespanTag = '30D PEAK SOLAR';
+      else if (mode === 'quarter') timespanTag = '90D PEAK SOLAR';
+      else if (mode === 'halfyear') timespanTag = '180D PEAK SOLAR';
+      else if (mode === 'year') timespanTag = '365D PEAK SOLAR';
+      else timespanTag = '24H PEAK SOLAR';
 
       const badgeText = `▲ ${timespanTag}: ${Math.round(peakSolarW)}W`;
 
@@ -1154,7 +1194,7 @@
     tooltip24h.innerHTML = `
       <div style="font-weight: 700; color: #f8fafc; margin-bottom: 4px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 2px;">🕒 ${timeStr}</div>
       <div style="color: #38bdf8; font-weight: 600;">☀️ Solar Panel: <strong>${pvV} V</strong></div>
-      <div style="color: #f59e0b; font-weight: 600;">⚡ Solar Drawn: <strong>${solW} W</strong></div>
+      <div style="color: #f59e0b; font-weight: 600;">⚡ Solar Power: <strong>${solW} W</strong></div>
       <div style="color: #10b981; font-weight: 600;">🔋 Battery Power: <strong>${battW} W</strong></div>
       <div style="color: #cbd5e1; font-size: 10px;">🟢 Battery SOC: <strong>${soc}%</strong> (${battV}V)</div>
       ${badge}
@@ -1369,12 +1409,12 @@
       ctx24h.stroke();
       ctx24h.setLineDash([]);
 
-      let spanTag = 'PEAK';
-      if (mode === 'week') spanTag = '7D PEAK';
-      else if (mode === 'month') spanTag = '30D PEAK';
-      else if (mode === 'quarter') spanTag = '90D PEAK';
-      else if (mode === 'halfyear') spanTag = '180D PEAK';
-      else if (mode === 'year') spanTag = '365D PEAK';
+      let spanTag = 'PEAK SOLAR';
+      if (mode === 'week') spanTag = '7D PEAK SOLAR';
+      else if (mode === 'month') spanTag = '30D PEAK SOLAR';
+      else if (mode === 'quarter') spanTag = '90D PEAK SOLAR';
+      else if (mode === 'halfyear') spanTag = '180D PEAK SOLAR';
+      else if (mode === 'year') spanTag = '365D PEAK SOLAR';
 
       const peakTag = `▲ ${spanTag}: ${Math.round(periodPeakSolarW)}W`;
       ctx24h.font = 'bold 10px var(--font-mono, monospace)';
@@ -2053,7 +2093,7 @@
       ctx7d.stroke();
       ctx7d.setLineDash([]);
 
-      const peakTag = `▲ 7D PEAK: ${Math.round(periodPeak7dW)}W`;
+      const peakTag = `▲ 7D PEAK SOLAR: ${Math.round(periodPeak7dW)}W`;
       ctx7d.font = 'bold 10px var(--font-mono, monospace)';
       const textMetrics = ctx7d.measureText(peakTag);
       const pillW = Math.round(textMetrics.width + 16);

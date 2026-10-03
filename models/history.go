@@ -6,7 +6,7 @@ import "time"
 type HistoryPoint24h struct {
 	Timestamp      time.Time `json:"timestamp"`
 	TimeLabel      string    `json:"time_label"`        // e.g. "08:15"
-	SolarPowerW    int       `json:"solar_power_w"`     // Solar Watts actually drawn
+	SolarPowerW    int       `json:"solar_power_w"`     // Solar Power Watts (PV Generation)
 	BatteryPowerW  int       `json:"battery_power_w"`   // Battery Routing Watts (Vbat * Ibat)
 	PVVoltage      float64   `json:"pv_voltage_v"`      // Solar Panel Voltage
 	BatterySOC     int       `json:"battery_soc"`       // Battery State of Charge %
