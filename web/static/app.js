@@ -823,19 +823,21 @@
     ctx24h.stroke();
     ctx24h.setLineDash([]); // reset
 
-    // 4. Layer B: Solar Voltage Curve (Vivid Sky Blue #38bdf8)
-    // Maps out Solar Volts across the full 24 hours
+    // 4. Layer B: Solar Voltage Curve (Dashed Sky Blue #38bdf8 - Auxiliary Reference)
+    // Rendered with a distinctive dashed pattern so it is never confused with solid power lines
     ctx24h.save();
     ctx24h.beginPath();
+    ctx24h.setLineDash([6, 4]);
     coords.forEach((pt, i) => {
       if (i === 0) ctx24h.moveTo(pt.x, pt.yVolt);
       else ctx24h.lineTo(pt.x, pt.yVolt);
     });
-    ctx24h.strokeStyle = '#38bdf8';
-    ctx24h.lineWidth = 2.5;
-    ctx24h.shadowColor = '#0284c7';
-    ctx24h.shadowBlur = 6;
+    ctx24h.strokeStyle = 'rgba(56, 189, 248, 0.85)';
+    ctx24h.lineWidth = 1.6;
+    ctx24h.shadowColor = 'rgba(56, 189, 248, 0.3)';
+    ctx24h.shadowBlur = 3;
     ctx24h.stroke();
+    ctx24h.setLineDash([]);
     ctx24h.restore();
 
     // 5. Layer C: Solar Power Area Fill (Warm Amber)
@@ -852,15 +854,19 @@
     ctx24h.fillStyle = areaGrad;
     ctx24h.fill();
 
-    // 6. Layer D: Solar Power Line (Amber)
+    // 6. Layer D: Solar Power Line (Solid Amber - Primary Hero Metric)
+    ctx24h.save();
     ctx24h.beginPath();
     coords.forEach((pt, i) => {
       if (i === 0) ctx24h.moveTo(pt.x, pt.ySolar);
       else ctx24h.lineTo(pt.x, pt.ySolar);
     });
     ctx24h.strokeStyle = '#f59e0b';
-    ctx24h.lineWidth = 2.0;
+    ctx24h.lineWidth = 2.4;
+    ctx24h.shadowColor = 'rgba(245, 158, 11, 0.45)';
+    ctx24h.shadowBlur = 5;
     ctx24h.stroke();
+    ctx24h.restore();
 
     // 7. Layer E: Battery Routing Power Line (Emerald Green)
     ctx24h.beginPath();
