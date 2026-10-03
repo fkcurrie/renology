@@ -1188,7 +1188,16 @@ html, body {
 .sunrise-dot { background-color: #fbbf24; box-shadow: 0 0 6px #f59e0b; }
 .sunset-dot { background-color: #f97316; box-shadow: 0 0 6px #ea580c; }
 .bar-dot { background-color: var(--accent-cyan); box-shadow: 0 0 6px var(--accent-cyan); }
-.peak-dot { background-color: var(--accent-gold); box-shadow: 0 0 6px var(--accent-gold); }
+.peak-line-dot,
+.legend-dash.peak-dash {
+  display: inline-block;
+  width: 14px;
+  height: 0;
+  border-radius: 0;
+  border-top: 2px dashed #ef4444;
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.7);
+  vertical-align: middle;
+}
 
 .legend-time {
   font-size: 10px;

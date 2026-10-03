@@ -118,6 +118,7 @@
   const elLegItemPower = document.getElementById('legItemPower');
   const elLegItemBatt = document.getElementById('legItemBatt');
   const elLegItemSoc = document.getElementById('legItemSoc');
+  const elLegItemPeak = document.getElementById('legItemPeak');
   const elLegItemSun = document.getElementById('legItemSun');
   const elTimespanSelector = document.getElementById('timespanSelector');
 
@@ -643,9 +644,12 @@
       }
     }
 
-    // Toggle sun legend item based on mode
+    // Toggle sun & peak legend items based on mode & peak
     if (elLegItemSun) {
       elLegItemSun.style.display = (mode === 'today') ? 'inline-flex' : 'none';
+    }
+    if (elLegItemPeak) {
+      elLegItemPeak.style.display = (peakSolarW > 0) ? 'inline-flex' : 'none';
     }
 
     // Determine Sunrise and Sunset positions for Dorset, Ontario
@@ -915,6 +919,92 @@
         ctx24h.fillText('SUNSET', xSunset, padTop + plotH - 4);
         ctx24h.restore();
       }
+    }
+
+    // =========================================================================
+    // LAYER E.3: PEAK SOLAR GENERATION REFERENCE LINE & HUD PILL BADGE
+    // =========================================================================
+    if (peakSolarW > 0 && maxW > 0) {
+      const clampedPeak = Math.min(peakSolarW, maxW);
+      const yPeak = padTop + plotH - (clampedPeak / maxW) * plotH;
+
+      // 1. Draw Dotted Red Peak Datum Line across chart
+      ctx24h.save();
+      ctx24h.beginPath();
+      ctx24h.setLineDash([4, 4]);
+      ctx24h.moveTo(padLeft, yPeak);
+      ctx24h.lineTo(w - padRight, yPeak);
+      ctx24h.strokeStyle = '#ef4444';
+      ctx24h.lineWidth = 1.5;
+      ctx24h.shadowColor = 'rgba(239, 68, 68, 0.55)';
+      ctx24h.shadowBlur = 5;
+      ctx24h.stroke();
+      ctx24h.setLineDash([]);
+      ctx24h.restore();
+
+      // 2. Format Badge Text per Timespan
+      let timespanTag = 'PEAK';
+      if (mode === 'week') timespanTag = '7D PEAK';
+      else if (mode === 'month') timespanTag = '30D PEAK';
+      else if (mode === 'quarter') timespanTag = '90D PEAK';
+      else if (mode === 'halfyear') timespanTag = '180D PEAK';
+      else if (mode === 'year') timespanTag = '365D PEAK';
+      else timespanTag = '24H PEAK';
+
+      const badgeText = `▲ ${timespanTag}: ${Math.round(peakSolarW)}W`;
+
+      // 3. Compute Pill Geometry
+      ctx24h.save();
+      ctx24h.font = 'bold 10px var(--font-mono, monospace)';
+      const textMetrics = ctx24h.measureText(badgeText);
+      const pillW = Math.round(textMetrics.width + 16);
+      const pillH = 18;
+
+      // 4. Horizontal Placement: Right-docked inside Volts axis
+      const pillX = w - padRight - pillW - 8;
+
+      // 5. Vertical Placement & Boundary Clamping
+      let pillY = Math.round(yPeak - pillH / 2);
+
+      // Clamp within plot vertical bounds
+      if (pillY < padTop + 2) {
+        pillY = padTop + 2;
+      } else if (pillY + pillH > padTop + plotH - 2) {
+        pillY = padTop + plotH - pillH - 2;
+      }
+
+      // Smart Evasion: If near top and overlapping sunset badge in Today mode
+      if (mode === 'today' && xSunset !== null && yPeak < padTop + 24) {
+        const sunsetPillApproxW = 75;
+        const sunsetPillX = Math.max(padLeft + 2, Math.min(w - padRight - sunsetPillApproxW - 2, xSunset - sunsetPillApproxW / 2));
+        if (Math.abs(pillX - sunsetPillX) < (pillW + sunsetPillApproxW) / 2) {
+          pillY = Math.min(padTop + plotH - pillH - 2, Math.round(yPeak + 4));
+        }
+      }
+
+      // 6. Render Automotive HUD Pill Container
+      ctx24h.beginPath();
+      if (ctx24h.roundRect) {
+        ctx24h.roundRect(pillX, pillY, pillW, pillH, 4);
+      } else {
+        ctx24h.rect(pillX, pillY, pillW, pillH);
+      }
+      ctx24h.fillStyle = 'rgba(15, 23, 42, 0.94)';
+      ctx24h.strokeStyle = 'rgba(239, 68, 68, 0.85)';
+      ctx24h.lineWidth = 1.2;
+      ctx24h.shadowColor = 'rgba(239, 68, 68, 0.40)';
+      ctx24h.shadowBlur = 4;
+      ctx24h.fill();
+      ctx24h.stroke();
+
+      // 7. Render High-Contrast Typography
+      ctx24h.shadowBlur = 0;
+      ctx24h.textAlign = 'center';
+      ctx24h.textBaseline = 'middle';
+      ctx24h.fillStyle = '#fee2e2';
+      ctx24h.fillText(badgeText, pillX + pillW / 2, pillY + pillH / 2);
+
+      ctx24h.restore();
     }
 
     // 8. Layer F: Active Hover / Touch Indicator Crosshair
@@ -1260,6 +1350,60 @@
       ctx24h.stroke();
     }
     ctx24h.setLineDash([]);
+
+    // Dotted Red Horizontal Reference Line & HUD Pill Badge for Period Peak
+    const periodPeakSolarW = days.reduce((max, d) => Math.max(max, d.peak_solar_w || 0), 0);
+    if (periodPeakSolarW > 0 && maxPeakW > 0) {
+      const clampedPeriodPeak = Math.min(periodPeakSolarW, maxPeakW);
+      const yPeak = padTop + plotH - (clampedPeriodPeak / maxPeakW) * plotH;
+
+      ctx24h.save();
+      ctx24h.beginPath();
+      ctx24h.setLineDash([4, 4]);
+      ctx24h.moveTo(padLeft, yPeak);
+      ctx24h.lineTo(w - padRight, yPeak);
+      ctx24h.strokeStyle = '#ef4444';
+      ctx24h.lineWidth = 1.5;
+      ctx24h.shadowColor = 'rgba(239, 68, 68, 0.55)';
+      ctx24h.shadowBlur = 5;
+      ctx24h.stroke();
+      ctx24h.setLineDash([]);
+
+      let spanTag = 'PEAK';
+      if (mode === 'week') spanTag = '7D PEAK';
+      else if (mode === 'month') spanTag = '30D PEAK';
+      else if (mode === 'quarter') spanTag = '90D PEAK';
+      else if (mode === 'halfyear') spanTag = '180D PEAK';
+      else if (mode === 'year') spanTag = '365D PEAK';
+
+      const peakTag = `▲ ${spanTag}: ${Math.round(periodPeakSolarW)}W`;
+      ctx24h.font = 'bold 10px var(--font-mono, monospace)';
+      const textMetrics = ctx24h.measureText(peakTag);
+      const pillW = Math.round(textMetrics.width + 16);
+      const pillH = 18;
+      const pillX = w - padRight - pillW - 8;
+      let pillY = Math.round(yPeak - pillH / 2);
+      if (pillY < padTop + 2) pillY = padTop + 2;
+      else if (pillY + pillH > padTop + plotH - 2) pillY = padTop + plotH - pillH - 2;
+
+      ctx24h.beginPath();
+      if (ctx24h.roundRect) ctx24h.roundRect(pillX, pillY, pillW, pillH, 4);
+      else ctx24h.rect(pillX, pillY, pillW, pillH);
+      ctx24h.fillStyle = 'rgba(15, 23, 42, 0.94)';
+      ctx24h.strokeStyle = 'rgba(239, 68, 68, 0.85)';
+      ctx24h.lineWidth = 1.2;
+      ctx24h.shadowColor = 'rgba(239, 68, 68, 0.40)';
+      ctx24h.shadowBlur = 4;
+      ctx24h.fill();
+      ctx24h.stroke();
+
+      ctx24h.shadowBlur = 0;
+      ctx24h.textAlign = 'center';
+      ctx24h.textBaseline = 'middle';
+      ctx24h.fillStyle = '#fee2e2';
+      ctx24h.fillText(peakTag, pillX + pillW / 2, pillY + pillH / 2);
+      ctx24h.restore();
+    }
 
     // 5. Data Points / Markers
     coords.forEach(pt => {
@@ -1695,6 +1839,7 @@
       elLegItemBatt.innerHTML = '<span class="legend-dot batt-dot"></span> Battery Power (W)';
     }
     if (elLegItemSoc) elLegItemSoc.style.display = 'flex';
+    if (elLegItemPeak) elLegItemPeak.style.display = 'flex';
 
     if (currentTimespan === 'today') {
       if (elHistoryChartTitle) elHistoryChartTitle.textContent = 'SOLAR POWER — TODAY (24H)';
@@ -1889,6 +2034,53 @@
       ctx7d.stroke();
     }
     ctx7d.setLineDash([]);
+
+    // Dotted Red Horizontal Reference Line & HUD Pill Badge for 7D Period Peak
+    const periodPeak7dW = days.reduce((max, d) => Math.max(max, d.peak_solar_w || 0), 0);
+    if (periodPeak7dW > 0 && maxPeakW > 0) {
+      const clamped7dPeak = Math.min(periodPeak7dW, maxPeakW);
+      const yPeak = padTop + plotH - (clamped7dPeak / maxPeakW) * plotH;
+
+      ctx7d.save();
+      ctx7d.beginPath();
+      ctx7d.setLineDash([4, 4]);
+      ctx7d.moveTo(padLeft, yPeak);
+      ctx7d.lineTo(w - padRight, yPeak);
+      ctx7d.strokeStyle = '#ef4444';
+      ctx7d.lineWidth = 1.5;
+      ctx7d.shadowColor = 'rgba(239, 68, 68, 0.55)';
+      ctx7d.shadowBlur = 5;
+      ctx7d.stroke();
+      ctx7d.setLineDash([]);
+
+      const peakTag = `▲ 7D PEAK: ${Math.round(periodPeak7dW)}W`;
+      ctx7d.font = 'bold 10px var(--font-mono, monospace)';
+      const textMetrics = ctx7d.measureText(peakTag);
+      const pillW = Math.round(textMetrics.width + 16);
+      const pillH = 18;
+      const pillX = w - padRight - pillW - 8;
+      let pillY = Math.round(yPeak - pillH / 2);
+      if (pillY < padTop + 2) pillY = padTop + 2;
+      else if (pillY + pillH > padTop + plotH - 2) pillY = padTop + plotH - pillH - 2;
+
+      ctx7d.beginPath();
+      if (ctx7d.roundRect) ctx7d.roundRect(pillX, pillY, pillW, pillH, 4);
+      else ctx7d.rect(pillX, pillY, pillW, pillH);
+      ctx7d.fillStyle = 'rgba(15, 23, 42, 0.94)';
+      ctx7d.strokeStyle = 'rgba(239, 68, 68, 0.85)';
+      ctx7d.lineWidth = 1.2;
+      ctx7d.shadowColor = 'rgba(239, 68, 68, 0.40)';
+      ctx7d.shadowBlur = 4;
+      ctx7d.fill();
+      ctx7d.stroke();
+
+      ctx7d.shadowBlur = 0;
+      ctx7d.textAlign = 'center';
+      ctx7d.textBaseline = 'middle';
+      ctx7d.fillStyle = '#fee2e2';
+      ctx7d.fillText(peakTag, pillX + pillW / 2, pillY + pillH / 2);
+      ctx7d.restore();
+    }
 
     // 5. Data Points & Badges
     coords.forEach(pt => {
