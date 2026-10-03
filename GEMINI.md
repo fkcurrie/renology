@@ -381,7 +381,12 @@ Off-grid solar installations are frequently situated behind mobile cellular hots
   - Daily ("Today" / 24H)
   - Weekly ("Week" / 7D)
   - Monthly ("Month" / 30D), Quarter (90D), Half Year (180D), Whole Year (365D)
-- **HUD Pill Badges**: Docked on the right canvas margin (`▲ 24H PEAK SOLAR: <W>W`, `▲ 7D PEAK SOLAR: <W>W`, `▲ 30D PEAK SOLAR: <W>W`).
+- **HUD Pill Badges**: Docked on the right canvas margin (`▲ 24H PEAK: <V>V`, `▲ 7D PEAK: <V>V`, `▲ 30D PEAK: <V>V`).
+- **Interactive Record Provenance Popover**:
+  - Hovering (or tapping) the HUD peak badge triggers an illuminated glowing accent border (`#f87171`) and displays an automotive HUD popover detailing when the record was established.
+  - Sourced from indexed SQLite telemetry queries (`ORDER BY pv_v DESC`, `ORDER BY pv_w DESC`) in `/api/history` (`resp.Peaks` via `queryPeakRecord()`).
+  - Reports exact timestamps for both Maximum Solar Voltage (e.g. `Today at 10:42 AM`) and Peak Generation (e.g. `Sun, Sep 27 at 9:21 AM`), accompanied by LiFePO4 battery SOC/voltage and active MPPT tracking context.
+  - Dismisses cleanly on mouseout or background tap with zero redraw penalty.
 - **Zero-Suppression**: During nighttime or before sunrise (when peak solar generation is 0W), the line and HUD badge are automatically hidden to avoid cluttering the baseline.
 
 ### 7.4 EasyWeather HP3500Pro Station Ingestion

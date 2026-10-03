@@ -62,6 +62,29 @@ type SunTimes struct {
 	Source      string    `json:"source"`       // "NOAA / NRC Canada Official Ephemeris"
 }
 
+// PeakRecord details the exact timestamp, voltage, watts, and battery context when a record was established.
+type PeakRecord struct {
+	Voltage           float64    `json:"voltage"`
+	VoltageTime       *time.Time `json:"voltage_time,omitempty"`
+	VoltageTimeStr    string     `json:"voltage_time_str,omitempty"`
+	SolarPowerW       int        `json:"solar_power_w"`
+	SolarPowerTime    *time.Time `json:"solar_power_time,omitempty"`
+	SolarPowerTimeStr string     `json:"solar_power_time_str,omitempty"`
+	BatterySOC        int        `json:"battery_soc,omitempty"`
+	BatteryVoltage    float64    `json:"battery_voltage_v,omitempty"`
+	ChargingStatus    string     `json:"charging_status,omitempty"`
+}
+
+// PeriodPeaks encapsulates the records for Today, Week, Month, Quarter, Half Year, and Whole Year.
+type PeriodPeaks struct {
+	Today    PeakRecord `json:"today"`
+	Week     PeakRecord `json:"week"`
+	Month    PeakRecord `json:"month"`
+	Quarter  PeakRecord `json:"quarter"`
+	HalfYear PeakRecord `json:"halfyear"`
+	Year     PeakRecord `json:"year"`
+}
+
 // HistoryResponse encapsulates both 24-hour and multi-timespan historical telemetry data.
 type HistoryResponse struct {
 	Points24h  []HistoryPoint24h      `json:"points_24h"`
@@ -77,6 +100,7 @@ type HistoryResponse struct {
 	Days365d   []DailySummaryRecord   `json:"days_365d"`
 	Months12m  []MonthlySummaryRecord `json:"months_12m"`
 	SunTimes   *SunTimes              `json:"sun_times,omitempty"`
+	Peaks      *PeriodPeaks           `json:"peaks,omitempty"`
 }
 
 // RecentMinutePoint represents an aggregated 1-minute point in a recent telemetry report.

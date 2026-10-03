@@ -55,6 +55,8 @@ CREATE TABLE IF NOT EXISTS telemetry (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_telemetry_timestamp ON telemetry(timestamp);
+CREATE INDEX IF NOT EXISTS idx_telemetry_pv_v ON telemetry(pv_v DESC, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_telemetry_pv_w ON telemetry(pv_w DESC, timestamp DESC);
 
 CREATE TABLE IF NOT EXISTS rf_survey (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -521,3 +523,100 @@ func (s *Storage) GetDBStats() (int64, int64, error) {
 
 	return count, fileSize, nil
 }
+
+// queryPeakRecord returns the highest voltage and highest solar power records within [start, end].
+func (s *Storage) queryPeakRecord(start, end time.Time, referenceTime time.Time) models.PeakRecord {
+	var pr models.PeakRecord
+	if s.db == nil {
+		return pr
+	}
+
+	startStr := start.Format(time.RFC3339Nano)
+	endStr := end.Format(time.RFC3339Nano)
+
+	// 1. Query max voltage record
+	vQuery := `
+SELECT timestamp, pv_v, pv_w, battery_v, battery_soc, COALESCE(charging_status, 'MPPT')
+FROM telemetry
+WHERE timestamp >= ? AND timestamp <= ?
+ORDER BY pv_v DESC, timestamp DESC
+LIMIT 1`
+	var vTsStr, vStatus string
+	var vVolts, vWatts, vBattV float64
+	var vSoc int
+	if err := s.db.QueryRow(vQuery, startStr, endStr).Scan(&vTsStr, &vVolts, &vWatts, &vBattV, &vSoc, &vStatus); err == nil && vVolts > 0 {
+		pr.Voltage = vVolts
+		if t, err := time.Parse(time.RFC3339Nano, vTsStr); err == nil {
+			tLoc := t.In(referenceTime.Location())
+			pr.VoltageTime = &tLoc
+			pr.VoltageTimeStr = formatRecordTime(tLoc, referenceTime)
+		} else if t, err := time.Parse(time.RFC3339, vTsStr); err == nil {
+			tLoc := t.In(referenceTime.Location())
+			pr.VoltageTime = &tLoc
+			pr.VoltageTimeStr = formatRecordTime(tLoc, referenceTime)
+		}
+		pr.BatterySOC = vSoc
+		pr.BatteryVoltage = vBattV
+		pr.ChargingStatus = vStatus
+	}
+
+	// 2. Query max solar power record
+	wQuery := `
+SELECT timestamp, pv_v, pv_w, battery_v, battery_soc, COALESCE(charging_status, 'MPPT')
+FROM telemetry
+WHERE timestamp >= ? AND timestamp <= ?
+ORDER BY pv_w DESC, timestamp DESC
+LIMIT 1`
+	var wTsStr, wStatus string
+	var wVolts, wWatts, wBattV float64
+	var wSoc int
+	if err := s.db.QueryRow(wQuery, startStr, endStr).Scan(&wTsStr, &wVolts, &wWatts, &wBattV, &wSoc, &wStatus); err == nil && wWatts > 0 {
+		pr.SolarPowerW = int(wWatts)
+		if t, err := time.Parse(time.RFC3339Nano, wTsStr); err == nil {
+			tLoc := t.In(referenceTime.Location())
+			pr.SolarPowerTime = &tLoc
+			pr.SolarPowerTimeStr = formatRecordTime(tLoc, referenceTime)
+		} else if t, err := time.Parse(time.RFC3339, wTsStr); err == nil {
+			tLoc := t.In(referenceTime.Location())
+			pr.SolarPowerTime = &tLoc
+			pr.SolarPowerTimeStr = formatRecordTime(tLoc, referenceTime)
+		}
+		if pr.ChargingStatus == "" {
+			pr.ChargingStatus = wStatus
+		}
+		if pr.BatterySOC == 0 {
+			pr.BatterySOC = wSoc
+		}
+		if pr.BatteryVoltage == 0 {
+			pr.BatteryVoltage = wBattV
+		}
+	}
+
+	return pr
+}
+
+// formatRecordTime formats a record timestamp into a friendly, human-readable string.
+func formatRecordTime(t time.Time, referenceTime time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	tInLoc := t.In(referenceTime.Location())
+	refInLoc := referenceTime.In(referenceTime.Location())
+
+	y1, m1, d1 := tInLoc.Date()
+	y2, m2, d2 := refInLoc.Date()
+
+	if y1 == y2 && m1 == m2 && d1 == d2 {
+		return fmt.Sprintf("Today at %s", tInLoc.Format("3:04 PM"))
+	}
+	yesterday := refInLoc.AddDate(0, 0, -1)
+	yY, mY, dY := yesterday.Date()
+	if y1 == yY && m1 == mY && d1 == dY {
+		return fmt.Sprintf("Yesterday at %s", tInLoc.Format("3:04 PM"))
+	}
+	if refInLoc.Sub(tInLoc) < 7*24*time.Hour && refInLoc.Sub(tInLoc) >= 0 {
+		return tInLoc.Format("Mon, Jan 02 at 3:04 PM")
+	}
+	return tInLoc.Format("Jan 02, 2006 at 3:04 PM")
+}
+

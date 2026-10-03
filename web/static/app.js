@@ -536,6 +536,8 @@
   let cachedPoints24h = null;
   let cachedMetrics24h = null;
   let activeHoverIdx24h = -1;
+  let cachedPeakBadge24h = null;
+  let isHoveringPeakBadge = false;
 
   // Official NOAA / NRC Canada astronomical ephemeris for Dorset, Ontario (45.2447° N, 78.8950° W)
   function getDorsetSunTimes(refDate) {
@@ -755,6 +757,9 @@
       } else {
         elPeak24h.textContent = `24h Peak Solar: ${peakSolarW} W • Max Solar: ${peakSolarV.toFixed(1)} V`;
       }
+      const details = resolvePeakRecordDetails(mode, peakSolarV, peakSolarW);
+      elPeak24h.title = `${details.title}: Max ${details.voltageStr} set ${details.voltageTimeStr} • Peak ${details.powerStr} set ${details.powerTimeStr}`;
+      elPeak24h.style.cursor = 'pointer';
     }
 
     // Toggle sun & peak legend items based on mode & peak
@@ -1051,10 +1056,10 @@
       ctx24h.setLineDash([4, 4]);
       ctx24h.moveTo(padLeft, yPeak);
       ctx24h.lineTo(w - padRight, yPeak);
-      ctx24h.strokeStyle = '#ef4444';
-      ctx24h.lineWidth = 1.5;
-      ctx24h.shadowColor = 'rgba(239, 68, 68, 0.55)';
-      ctx24h.shadowBlur = 5;
+      ctx24h.strokeStyle = isHoveringPeakBadge ? '#f87171' : '#ef4444';
+      ctx24h.lineWidth = isHoveringPeakBadge ? 2.0 : 1.5;
+      ctx24h.shadowColor = isHoveringPeakBadge ? 'rgba(239, 68, 68, 0.85)' : 'rgba(239, 68, 68, 0.55)';
+      ctx24h.shadowBlur = isHoveringPeakBadge ? 8 : 5;
       ctx24h.stroke();
       ctx24h.setLineDash([]);
       ctx24h.restore();
@@ -1100,6 +1105,19 @@
         }
       }
 
+      // Record Badge Geometry for Hover & Touch hit-testing
+      cachedPeakBadge24h = {
+        x: pillX,
+        y: pillY,
+        w: pillW,
+        h: pillH,
+        peakSolarV,
+        peakSolarW,
+        mode,
+        badgeText,
+        yPeak
+      };
+
       // 6. Render Automotive HUD Pill Container
       ctx24h.beginPath();
       if (ctx24h.roundRect) {
@@ -1107,11 +1125,11 @@
       } else {
         ctx24h.rect(pillX, pillY, pillW, pillH);
       }
-      ctx24h.fillStyle = 'rgba(15, 23, 42, 0.94)';
-      ctx24h.strokeStyle = 'rgba(239, 68, 68, 0.85)';
-      ctx24h.lineWidth = 1.2;
-      ctx24h.shadowColor = 'rgba(239, 68, 68, 0.40)';
-      ctx24h.shadowBlur = 4;
+      ctx24h.fillStyle = isHoveringPeakBadge ? 'rgba(30, 41, 59, 0.98)' : 'rgba(15, 23, 42, 0.94)';
+      ctx24h.strokeStyle = isHoveringPeakBadge ? '#f87171' : 'rgba(239, 68, 68, 0.85)';
+      ctx24h.lineWidth = isHoveringPeakBadge ? 1.8 : 1.2;
+      ctx24h.shadowColor = isHoveringPeakBadge ? 'rgba(239, 68, 68, 0.80)' : 'rgba(239, 68, 68, 0.40)';
+      ctx24h.shadowBlur = isHoveringPeakBadge ? 8 : 4;
       ctx24h.fill();
       ctx24h.stroke();
 
@@ -1119,10 +1137,12 @@
       ctx24h.shadowBlur = 0;
       ctx24h.textAlign = 'center';
       ctx24h.textBaseline = 'middle';
-      ctx24h.fillStyle = '#fee2e2';
+      ctx24h.fillStyle = isHoveringPeakBadge ? '#ffffff' : '#fee2e2';
       ctx24h.fillText(badgeText, pillX + pillW / 2, pillY + pillH / 2);
 
       ctx24h.restore();
+    } else {
+      cachedPeakBadge24h = null;
     }
 
     // 8. Layer F: Active Hover / Touch Indicator Crosshair
@@ -1194,22 +1214,189 @@
     }
   }
 
+  // Resolve exact peak record details from backend historyData.peaks or client-side fallback
+  function resolvePeakRecordDetails(mode, peakSolarV, peakSolarW) {
+    let title = 'ALL-TIME SOLAR RECORD';
+    if (mode === 'today') title = '24H SOLAR RECORD';
+    else if (mode === 'week') title = '7-DAY SOLAR RECORD';
+    else if (mode === 'month') title = '30-DAY SOLAR RECORD';
+    else if (mode === 'quarter') title = '90-DAY SOLAR RECORD';
+    else if (mode === 'halfyear') title = '180-DAY SOLAR RECORD';
+    else if (mode === 'year') title = 'ALL-TIME SOLAR RECORD';
+
+    let voltageStr = `${(peakSolarV || 0).toFixed(1)} V`;
+    let voltageTimeStr = 'Recorded Today';
+    let powerStr = `${peakSolarW || 0} W`;
+    let powerTimeStr = 'Recorded Today';
+    let status = 'MPPT Active Tracking';
+    let batteryNote = '100% Reserve';
+
+    // 1. Try to read from backend historyData.peaks
+    if (historyData && historyData.peaks) {
+      const pKey = mode === 'halfyear' ? 'halfyear' : mode;
+      const pr = historyData.peaks[pKey] || historyData.peaks['year'] || historyData.peaks['today'];
+      if (pr) {
+        if (pr.voltage > 0) voltageStr = `${pr.voltage.toFixed(1)} V`;
+        if (pr.voltage_time_str) voltageTimeStr = pr.voltage_time_str;
+        if (pr.solar_power_w > 0) powerStr = `${pr.solar_power_w} W`;
+        if (pr.solar_power_time_str) powerTimeStr = pr.solar_power_time_str;
+        if (pr.charging_status) status = `${pr.charging_status} Active`;
+        if (pr.battery_soc > 0) {
+          batteryNote = `${pr.battery_soc}% SOC${pr.battery_voltage_v > 0 ? ' • ' + pr.battery_voltage_v.toFixed(1) + 'V' : ''}`;
+        }
+        return { title, voltageStr, voltageTimeStr, powerStr, powerTimeStr, status, batteryNote };
+      }
+    }
+
+    // 2. Client-side fallback from points & days
+    if (cachedPoints24h && cachedPoints24h.length > 0) {
+      let vPt = null;
+      let wPt = null;
+      for (const pt of cachedPoints24h) {
+        if (!vPt && pt.pv_voltage_v && Math.abs(pt.pv_voltage_v - peakSolarV) < 0.15) {
+          vPt = pt;
+        }
+        if (!wPt && pt.solar_power_w && pt.solar_power_w >= (peakSolarW || 0) - 2) {
+          wPt = pt;
+        }
+      }
+
+      if (vPt && vPt.timestamp) {
+        const d = new Date(vPt.timestamp);
+        if (!isNaN(d.getTime())) {
+          if (mode === 'today') {
+            voltageTimeStr = `Today at ${d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+          } else {
+            voltageTimeStr = d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }) + ' at ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+          }
+        }
+      }
+      if (wPt && wPt.timestamp) {
+        const d = new Date(wPt.timestamp);
+        if (!isNaN(d.getTime())) {
+          if (mode === 'today') {
+            powerTimeStr = `Today at ${d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+          } else {
+            powerTimeStr = d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }) + ' at ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+          }
+        }
+      }
+    }
+
+    return { title, voltageStr, voltageTimeStr, powerStr, powerTimeStr, status, batteryNote };
+  }
+
+  // Display rich HUD popover when hovering directly over the peak badge
+  function showPeakBadgeTooltip(clientX, clientY, badge) {
+    if (!tooltip24h || !canvas24h) return;
+    const rect = canvas24h.getBoundingClientRect();
+    const mode = badge.mode || currentTimespan;
+
+    const details = resolvePeakRecordDetails(mode, badge.peakSolarV, badge.peakSolarW);
+
+    tooltip24h.classList.add('peak-tooltip-active');
+    tooltip24h.innerHTML = `
+      <div class="peak-tooltip-header">
+        <span class="peak-trophy">🏆</span>
+        <span class="peak-header-title">${details.title}</span>
+      </div>
+      <div class="peak-tooltip-body">
+        <div class="peak-metric-row">
+          <span class="metric-label">☀️ Max Solar Volts:</span>
+          <span class="metric-val volt-val">${details.voltageStr}</span>
+        </div>
+        <div class="peak-time-row">
+          <span class="time-label">🕒 Record Set:</span>
+          <span class="time-val">${details.voltageTimeStr}</span>
+        </div>
+        <div class="peak-metric-row" style="margin-top: 5px; padding-top: 5px; border-top: 1px dashed rgba(255,255,255,0.15);">
+          <span class="metric-label">⚡ Peak Generation:</span>
+          <span class="metric-val watt-val">${details.powerStr}</span>
+        </div>
+        <div class="peak-time-row">
+          <span class="time-label">🕒 Record Set:</span>
+          <span class="time-val">${details.powerTimeStr}</span>
+        </div>
+        <div class="peak-context-row">
+          <span class="context-pill">${details.status}</span>
+          <span class="context-pill">${details.batteryNote}</span>
+        </div>
+      </div>
+    `;
+
+    tooltip24h.style.display = 'block';
+
+    const tipX = clientX - rect.left;
+    const tipY = clientY - rect.top;
+
+    let leftPos = tipX - 250;
+    if (leftPos < 8) {
+      leftPos = Math.min(rect.width - 250, tipX + 15);
+    }
+    let topPos = Math.max(8, tipY - 40);
+    if (topPos + 180 > rect.height) {
+      topPos = Math.max(8, rect.height - 185);
+    }
+
+    tooltip24h.style.left = `${leftPos}px`;
+    tooltip24h.style.top = `${topPos}px`;
+  }
+
   // Hover and Touch interaction handlers for 24h / timespan chart
   function handle24hHover(clientX, clientY) {
     if (!canvas24h || !cachedPoints24h || !cachedMetrics24h || !tooltip24h) return;
     const rect = canvas24h.getBoundingClientRect();
     const xInCanvas = (clientX - rect.left) * (cachedMetrics24h.w / rect.width);
+    const yInCanvas = (clientY - rect.top) * (cachedMetrics24h.h / rect.height);
     const { padLeft, plotW, mode } = cachedMetrics24h;
+
+    // 1. Check hit test against the Peak HUD badge
+    let overBadge = false;
+    if (cachedPeakBadge24h) {
+      const padHitX = 14;
+      const padHitY = 10;
+      if (
+        xInCanvas >= cachedPeakBadge24h.x - padHitX &&
+        xInCanvas <= cachedPeakBadge24h.x + cachedPeakBadge24h.w + padHitX &&
+        yInCanvas >= cachedPeakBadge24h.y - padHitY &&
+        yInCanvas <= cachedPeakBadge24h.y + cachedPeakBadge24h.h + padHitY
+      ) {
+        overBadge = true;
+      }
+    }
+
+    if (overBadge) {
+      canvas24h.style.cursor = 'pointer';
+      activeHoverIdx24h = -1; // disable standard crosshair
+      if (!isHoveringPeakBadge) {
+        isHoveringPeakBadge = true;
+        draw24hChart(cachedPoints24h, mode);
+      }
+      showPeakBadgeTooltip(clientX, clientY, cachedPeakBadge24h);
+      return;
+    }
+
+    // If previously hovering over badge but now moved off
+    if (isHoveringPeakBadge) {
+      isHoveringPeakBadge = false;
+      canvas24h.style.cursor = 'crosshair';
+      tooltip24h.classList.remove('peak-tooltip-active');
+      draw24hChart(cachedPoints24h, mode);
+    }
 
     const xRel = xInCanvas - padLeft;
     if (xRel < 0 || xRel > plotW) {
       tooltip24h.style.display = 'none';
+      tooltip24h.classList.remove('peak-tooltip-active');
       if (activeHoverIdx24h !== -1) {
         activeHoverIdx24h = -1;
         draw24hChart(cachedPoints24h, mode);
       }
       return;
     }
+
+    canvas24h.style.cursor = 'crosshair';
+    tooltip24h.classList.remove('peak-tooltip-active');
 
     const ratio = Math.max(0, Math.min(1, xRel / plotW));
     const idx = Math.min(cachedPoints24h.length - 1, Math.round(ratio * (cachedPoints24h.length - 1)));
@@ -1291,11 +1478,18 @@
   }
 
   function handle24hLeave() {
-    if (tooltip24h) tooltip24h.style.display = 'none';
+    if (tooltip24h) {
+      tooltip24h.style.display = 'none';
+      tooltip24h.classList.remove('peak-tooltip-active');
+    }
+    if (isHoveringPeakBadge) {
+      isHoveringPeakBadge = false;
+      if (canvas24h) canvas24h.style.cursor = 'crosshair';
+    }
     if (activeHoverIdx24h !== -1) {
       activeHoverIdx24h = -1;
-      if (cachedPoints24h) draw24hChart(cachedPoints24h, cachedMetrics24h ? cachedMetrics24h.mode : currentTimespan);
     }
+    if (cachedPoints24h) draw24hChart(cachedPoints24h, cachedMetrics24h ? cachedMetrics24h.mode : currentTimespan);
   }
 
   // =========================================================================

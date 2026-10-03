@@ -217,6 +217,27 @@ func TestBucketingPreservesPeakValuesOverTime(t *testing.T) {
 			t.Errorf("Days30d lost PeakSolarWatts: got %d, expected 286", last30.PeakSolarWatts)
 		}
 	}
+
+	// Verify PeriodPeaks record metadata and exact timestamps
+	if hist.Peaks == nil {
+		t.Fatalf("expected hist.Peaks to be non-nil")
+	}
+	if hist.Peaks.Today.Voltage != 44.4 {
+		t.Errorf("Peaks.Today.Voltage = %.1f, expected 44.4", hist.Peaks.Today.Voltage)
+	}
+	if hist.Peaks.Today.SolarPowerW != 286 {
+		t.Errorf("Peaks.Today.SolarPowerW = %d, expected 286", hist.Peaks.Today.SolarPowerW)
+	}
+	if hist.Peaks.Today.VoltageTimeStr == "" {
+		t.Errorf("Peaks.Today.VoltageTimeStr is empty")
+	}
+	if hist.Peaks.Today.SolarPowerTimeStr == "" {
+		t.Errorf("Peaks.Today.SolarPowerTimeStr is empty")
+	}
+	if hist.Peaks.Week.Voltage != 44.4 || hist.Peaks.Week.SolarPowerW != 286 {
+		t.Errorf("Peaks.Week does not preserve peaks: V=%.1f, W=%d", hist.Peaks.Week.Voltage, hist.Peaks.Week.SolarPowerW)
+	}
 }
+
 
 

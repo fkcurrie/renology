@@ -163,6 +163,46 @@ func (s *Storage) GetHistory(referenceTime time.Time) (*models.HistoryResponse, 
 		}
 	}
 
+	var peaks *models.PeriodPeaks
+	if s.db != nil {
+		loc := referenceTime.Location()
+		startToday := time.Date(referenceTime.Year(), referenceTime.Month(), referenceTime.Day(), 0, 0, 0, 0, loc)
+		pToday := s.queryPeakRecord(startToday, referenceTime, referenceTime)
+		pWeek := s.queryPeakRecord(referenceTime.Add(-7*24*time.Hour), referenceTime, referenceTime)
+		pMonth := s.queryPeakRecord(referenceTime.Add(-30*24*time.Hour), referenceTime, referenceTime)
+		pQuarter := s.queryPeakRecord(referenceTime.Add(-90*24*time.Hour), referenceTime, referenceTime)
+		pHalfYear := s.queryPeakRecord(referenceTime.Add(-180*24*time.Hour), referenceTime, referenceTime)
+		pYear := s.queryPeakRecord(referenceTime.Add(-365*24*time.Hour), referenceTime, referenceTime)
+
+		alignPeak := func(broader, narrower *models.PeakRecord) {
+			if broader.Voltage < narrower.Voltage {
+				broader.Voltage = narrower.Voltage
+				broader.VoltageTime = narrower.VoltageTime
+				broader.VoltageTimeStr = narrower.VoltageTimeStr
+			}
+			if broader.SolarPowerW < narrower.SolarPowerW {
+				broader.SolarPowerW = narrower.SolarPowerW
+				broader.SolarPowerTime = narrower.SolarPowerTime
+				broader.SolarPowerTimeStr = narrower.SolarPowerTimeStr
+			}
+		}
+
+		alignPeak(&pWeek, &pToday)
+		alignPeak(&pMonth, &pWeek)
+		alignPeak(&pQuarter, &pMonth)
+		alignPeak(&pHalfYear, &pQuarter)
+		alignPeak(&pYear, &pHalfYear)
+
+		peaks = &models.PeriodPeaks{
+			Today:    pToday,
+			Week:     pWeek,
+			Month:    pMonth,
+			Quarter:  pQuarter,
+			HalfYear: pHalfYear,
+			Year:     pYear,
+		}
+	}
+
 	resp := &models.HistoryResponse{
 		Points24h:  points24h,
 		Points7d:   points7d,
@@ -177,6 +217,7 @@ func (s *Storage) GetHistory(referenceTime time.Time) (*models.HistoryResponse, 
 		Days365d:   days365d,
 		Months12m:  months12m,
 		SunTimes:   GetDorsetSunTimes(referenceTime),
+		Peaks:      peaks,
 	}
 
 	s.cachedHistory = resp
