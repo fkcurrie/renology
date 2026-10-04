@@ -344,5 +344,64 @@ func TestCameraEndpoints(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("Expected 401 Unauthorized for wait-request without token, got %d", rec.Code)
 	}
+
+	// 5. Test direct GET /api/camera/stream without ticket (should be 403 Forbidden)
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("GET", "/api/camera/stream", nil)
+	server.httpServer.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("Expected 403 Forbidden for direct stream without ticket, got %d", rec.Code)
+	}
+
+	// 6. Test POST /api/camera/ticket from unauthorized origin (should be 403 Forbidden)
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("POST", "/api/camera/ticket", nil)
+	req.Header.Set("Origin", "https://malicious-site.example.com")
+	server.httpServer.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("Expected 403 Forbidden for ticket request from untrusted origin, got %d", rec.Code)
+	}
+
+	// 7. Test POST /api/camera/ticket from valid dashboard origin (should be 200 OK with ticket)
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("POST", "/api/camera/ticket", nil)
+	req.Header.Set("Origin", "https://solar.sfle.ca")
+	server.httpServer.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK for valid dashboard origin ticket, got %d", rec.Code)
+	}
+	var ticketResp map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &ticketResp); err != nil {
+		t.Fatalf("Failed to parse ticket JSON: %v", err)
+	}
+	ticketStr, ok := ticketResp["ticket"].(string)
+	if !ok || ticketStr == "" {
+		t.Fatalf("Expected non-empty ticket string, got %v", ticketResp["ticket"])
+	}
+
+	// 8. Test GET /api/camera/stream with tampered ticket (should be 403 Forbidden)
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("GET", "/api/camera/stream?ticket=123456.abcdef.invalidhash", nil)
+	req.Header.Set("Origin", "https://solar.sfle.ca")
+	server.httpServer.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("Expected 403 Forbidden for tampered ticket, got %d", rec.Code)
+	}
+
+	// 9. Test edge server mode (CloudRelay=false): ticket request should be rejected with 403
+	edgeServer, err := NewServer(ServerConfig{
+		ListenAddr: ":0",
+		CloudRelay: false,
+	})
+	if err != nil {
+		t.Fatalf("NewServer edge failed: %v", err)
+	}
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("POST", "/api/camera/ticket", nil)
+	req.Header.Set("Origin", "http://localhost:8080")
+	edgeServer.httpServer.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("Expected 403 Forbidden for ticket request on edge host, got %d", rec.Code)
+	}
 }
 

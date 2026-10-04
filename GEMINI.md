@@ -364,10 +364,10 @@ Off-grid solar installations are frequently situated behind mobile cellular hots
 - **Hardware**: Voltworks 1000W Continuous / 2000W Surge Pure Sine Wave Inverter 12V DC to 110V/120V AC (CETL/CSA listed, built-in UL fuses, compatible with LiFePO4 battery and Starlink).
 - **Usable Energy Reserve**: Calculated against 100Ah LiFePO4 nominal capacity ($100\text{ Ah} \times 12.8\text{V} \approx 1,280\text{ Wh}$).
 - **Dynamic Autonomy Projections**:
-  - Starlink (RV/Cabin): 50W (~24.5 hrs on full reserve)
+  - Starlink (RV/Cottage): 50W (~24.5 hrs on full reserve)
   - Laptop & Phones: 45W (~27.0 hrs)
   - 12V Cooler / Portable Fridge: 35W avg (~34.0 hrs)
-  - Cabin LED Lighting: 15W (~75.0 hrs)
+  - Cottage LED Lighting: 15W (~75.0 hrs)
   - Inverter Tare Standby: 8W (~6.0 days)
 - **Headroom Indicator**: Real-time progress bar tracking total inverter capacity headroom (1000W continuous rating).
 

@@ -2,14 +2,20 @@ package web
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
 	"log"
 	"net/http"
+	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -41,6 +47,7 @@ type Server struct {
 	cachedWeather []byte
 	cachedHistory *models.HistoryResponse
 	cameraRelay   *camera.Relay
+	ticketSecret  []byte
 }
 
 // CameraRelay returns the underlying camera streaming relay.
@@ -54,9 +61,20 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		cfg.ListenAddr = ":8080"
 	}
 
+	secret := make([]byte, 32)
+	if cfg.CloudToken != "" {
+		h := sha256.Sum256([]byte("renology-ticket-salt:" + cfg.CloudToken))
+		copy(secret, h[:])
+	} else {
+		if _, err := rand.Read(secret); err != nil {
+			return nil, fmt.Errorf("failed to generate ticket secret: %w", err)
+		}
+	}
+
 	s := &Server{
-		config:      cfg,
-		cameraRelay: camera.NewRelay(),
+		config:       cfg,
+		cameraRelay:  camera.NewRelay(),
+		ticketSecret: secret,
 	}
 
 	mux := http.NewServeMux()
@@ -73,6 +91,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	mux.HandleFunc("/api/camera/status", s.handleCameraStatus)
 	mux.HandleFunc("/api/camera/wait-request", s.handleCameraWaitRequest)
 	mux.HandleFunc("/api/camera/ingress", s.handleCameraIngress)
+	mux.HandleFunc("/api/camera/ticket", s.handleCameraTicket)
 	mux.HandleFunc("/api/camera/stream", s.handleCameraStream)
 
 	// 2. Embedded Static Assets
@@ -364,6 +383,135 @@ func (s *Server) handleCameraStatus(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+// isValidDashboardOrigin verifies that a request originates from an authorized dashboard.
+func (s *Server) isValidDashboardOrigin(originHeader, refererHeader string) bool {
+	rawURL := originHeader
+	if rawURL == "" {
+		rawURL = refererHeader
+	}
+	if rawURL == "" {
+		return false
+	}
+
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+
+	hostname := parsed.Hostname()
+	if hostname == "" {
+		return false
+	}
+
+	// Allow local development and Surface Go 2 kiosk loopback
+	if hostname == "localhost" || hostname == "127.0.0.1" || hostname == "::1" {
+		return true
+	}
+
+	// Allow custom domain
+	if hostname == "solar.sfle.ca" {
+		return true
+	}
+
+	// Allow Cloud Run generated hostnames (*.run.app)
+	if strings.HasSuffix(hostname, ".run.app") {
+		return true
+	}
+
+	return false
+}
+
+// generateCameraTicket mints an ephemeral HMAC-SHA256 signed ticket valid for 60 seconds.
+func (s *Server) generateCameraTicket() (string, int64) {
+	now := time.Now().Unix()
+	nonceBytes := make([]byte, 16)
+	_, _ = rand.Read(nonceBytes)
+	nonce := hex.EncodeToString(nonceBytes)
+
+	payload := fmt.Sprintf("%d:%s", now, nonce)
+	mac := hmac.New(sha256.New, s.ticketSecret)
+	mac.Write([]byte(payload))
+	sig := hex.EncodeToString(mac.Sum(nil))
+
+	ticket := fmt.Sprintf("%d.%s.%s", now, nonce, sig)
+	return ticket, 60
+}
+
+// validateCameraTicket checks that the ticket has a valid HMAC signature and has not expired.
+func (s *Server) validateCameraTicket(ticket string) bool {
+	parts := strings.Split(ticket, ".")
+	if len(parts) != 3 {
+		return false
+	}
+
+	ts, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		return false
+	}
+
+	now := time.Now().Unix()
+	// Ticket must be within 60 seconds old (allow up to 5s future drift)
+	if now-ts > 60 || ts-now > 5 {
+		return false
+	}
+
+	payload := fmt.Sprintf("%d:%s", ts, parts[1])
+	mac := hmac.New(sha256.New, s.ticketSecret)
+	mac.Write([]byte(payload))
+	expectedSig := hex.EncodeToString(mac.Sum(nil))
+
+	return subtle.ConstantTimeCompare([]byte(expectedSig), []byte(parts[2])) == 1
+}
+
+// handleCameraTicket mints a secure, ephemeral session ticket for the Cloud Run dashboard.
+func (s *Server) handleCameraTicket(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+
+	// Camera stream is restricted strictly to Cloud Run relay
+	if !s.config.CloudRelay {
+		http.Error(w, `{"error":"Camera stream is only accessible via the Cloud Run dashboard"}`, http.StatusForbidden)
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"POST method required"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Validate Origin / Referer from Cloud Run dashboard
+	origin := r.Header.Get("Origin")
+	referer := r.Header.Get("Referer")
+	if !s.isValidDashboardOrigin(origin, referer) {
+		http.Error(w, `{"error":"Unauthorized request origin. Tickets are only issued from the Cloud Run dashboard"}`, http.StatusForbidden)
+		return
+	}
+
+	// Optional Cottage Cam Key protection via RENOLOGY_CAM_KEY environment variable
+	expectedCamKey := os.Getenv("RENOLOGY_CAM_KEY")
+	if expectedCamKey != "" {
+		var reqBody struct {
+			Key string `json:"key"`
+		}
+		_ = json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&reqBody)
+		if reqBody.Key == "" || subtle.ConstantTimeCompare([]byte(reqBody.Key), []byte(expectedCamKey)) != 1 {
+			w.WriteHeader(http.StatusUnauthorized)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"error":        "Valid Cottage Cam key required",
+				"key_required": true,
+			})
+			return
+		}
+	}
+
+	ticket, expiresIn := s.generateCameraTicket()
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"ticket":     ticket,
+		"expires_in": expiresIn,
+	})
+}
+
 // handleCameraWaitRequest is long-polled by the edge worker to wait for active viewers.
 func (s *Server) handleCameraWaitRequest(w http.ResponseWriter, r *http.Request) {
 	if s.config.CloudToken != "" || s.config.CloudRelay {
@@ -425,8 +573,28 @@ func (s *Server) handleCameraIngress(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleCameraStream serves the live fragmented MP4 stream to web browsers via HTTP chunked transfer.
+// Strictly available ONLY via the Cloud Run dashboard with an ephemeral ticket.
 func (s *Server) handleCameraStream(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	// Strictly prohibit direct streaming on Edge host
+	if !s.config.CloudRelay {
+		http.Error(w, `{"error":"Camera stream is only accessible via the Cloud Run dashboard"}`, http.StatusForbidden)
+		return
+	}
+
+	// Validate ephemeral ticket
+	ticket := r.URL.Query().Get("ticket")
+	if ticket == "" || !s.validateCameraTicket(ticket) {
+		http.Error(w, `{"error":"Forbidden: invalid or expired camera ticket. Access must originate from the Cloud Run dashboard"}`, http.StatusForbidden)
+		return
+	}
+
+	// Validate origin or referer if provided
+	origin := r.Header.Get("Origin")
+	referer := r.Header.Get("Referer")
+	if (origin != "" || referer != "") && !s.isValidDashboardOrigin(origin, referer) {
+		http.Error(w, `{"error":"Forbidden: invalid dashboard origin"}`, http.StatusForbidden)
+		return
+	}
 
 	// Disable write timeout for continuous streaming
 	rc := http.NewResponseController(w)

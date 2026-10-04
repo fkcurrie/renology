@@ -36,8 +36,8 @@
       </div>
 
       <div class="header-controls">
-        <button id="cameraBtn" class="kiosk-btn camera-btn" title="View Live Cabin Camera" style="display: none;">
-          <span class="camera-pulse-dot"></span> 📹 Cabin Cam
+        <button id="cameraBtn" class="kiosk-btn camera-btn" title="View Live Cottage Camera" style="display: none;">
+          <span class="camera-pulse-dot"></span> 📹 Cottage Cam
         </button>
         <div class="connection-heartbeat online" id="heartbeatContainer" title="BLE Link Active">
           <span class="heartbeat-icon beating" id="heartbeatIcon">❤️</span>
@@ -305,7 +305,7 @@
             </thead>
             <tbody id="autonomyTableBody">
               <tr>
-                <td><span class="appliance-icon">🛰️</span> Starlink (RV/Cabin)</td>
+                <td><span class="appliance-icon">🛰️</span> Starlink (RV/Cottage)</td>
                 <td class="text-center"><span class="load-badge">50W</span></td>
                 <td class="text-right"><strong class="runtime-val" id="runStarlink">~24.5 hrs</strong></td>
               </tr>
@@ -320,7 +320,7 @@
                 <td class="text-right"><strong class="runtime-val" id="runFridge">~34.0 hrs</strong></td>
               </tr>
               <tr>
-                <td><span class="appliance-icon">💡</span> Cabin LED Lighting</td>
+                <td><span class="appliance-icon">💡</span> Cottage LED Lighting</td>
                 <td class="text-center"><span class="load-badge">15W</span></td>
                 <td class="text-right"><strong class="runtime-val" id="runLights">~75.0 hrs</strong></td>
               </tr>
@@ -359,13 +359,13 @@
     </footer>
   </div>
 
-  <!-- Cabin Camera Live Stream Modal -->
+  <!-- Cottage Camera Live Stream Modal -->
   <div id="cameraModal" class="camera-modal-backdrop" style="display: none;">
     <div class="camera-modal-dialog">
       <div class="camera-modal-header">
         <div class="camera-modal-title">
           <span class="camera-live-badge" id="cameraStatusBadge">● CONNECTING</span>
-          <span class="camera-title-text">CABIN LIVE CAMERA</span>
+          <span class="camera-title-text">COTTAGE LIVE CAMERA</span>
           <span class="camera-meta-pill" id="cameraResPill">720p HD • 30fps</span>
         </div>
         <div class="camera-header-actions">
@@ -379,13 +379,13 @@
         <video id="cameraVideo" autoplay muted playsinline></video>
         <div class="camera-loading-overlay" id="cameraLoadingOverlay">
           <div class="camera-spinner"></div>
-          <div class="camera-loading-text" id="cameraLoadingText">Connecting to Surface Go 2 live camera...</div>
+          <div class="camera-loading-text" id="cameraLoadingText">Connecting to Cottage live camera...</div>
         </div>
       </div>
 
       <div class="camera-modal-footer">
         <div class="camera-audio-controls">
-          <button id="cameraAudioToggle" class="camera-audio-btn muted" title="Click to Unmute Cabin Audio">
+          <button id="cameraAudioToggle" class="camera-audio-btn muted" title="Click to Unmute Cottage Audio">
             <span id="cameraAudioIcon">🔇</span> <span id="cameraAudioLabel">Audio Muted (Click to Unmute)</span>
           </button>
           <input type="range" id="cameraVolumeSlider" min="0" max="1" step="0.05" value="1.0" class="camera-volume-slider" title="Microphone Volume">

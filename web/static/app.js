@@ -74,7 +74,7 @@
   const elCurtailmentBarFill = document.getElementById('curtailmentBarFill');
   const elSunPotentialVal = document.getElementById('sunPotentialVal');
 
-  // Cabin & Environment Card
+  // Cottage & Environment Card
   const elCtrlTemp = document.getElementById('ctrlTempVal');
   const elBattTemp = document.getElementById('battTempVal');
   const elCabinTempVal = document.getElementById('cabinTempVal');

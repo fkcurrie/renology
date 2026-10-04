@@ -1,5 +1,5 @@
 // ============================================================================
-// Renology Cabin Live Camera Module (MSE fMP4 Stream + Audio Controls)
+// Renology Cottage Live Camera Module (MSE fMP4 Stream + Audio Controls)
 // ============================================================================
 const RenologyCamera = (function() {
   let mediaSource = null;
@@ -37,6 +37,35 @@ const RenologyCamera = (function() {
     } catch (e) {
       console.warn('Failed to probe camera status:', e);
     }
+  }
+
+  async function fetchTicket() {
+    let key = sessionStorage.getItem('renology_cam_key') || '';
+    const res = await fetch('/api/camera/ticket', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: key })
+    });
+
+    if (res.status === 401 || res.status === 403) {
+      const data = await res.json().catch(() => ({}));
+      if (data.key_required) {
+        key = prompt('Enter Cottage Cam Access Key:');
+        if (!key) {
+          throw new Error('Cottage Cam Access Key is required');
+        }
+        sessionStorage.setItem('renology_cam_key', key);
+        return fetchTicket();
+      }
+      throw new Error(data.error || 'Access denied: camera stream is strictly restricted to Cloud Run dashboard');
+    }
+
+    if (!res.ok) {
+      throw new Error('Failed to acquire secure camera ticket: HTTP ' + res.status);
+    }
+
+    const data = await res.json();
+    return data.ticket;
   }
 
   function startStream(videoEl, loadingOverlay, statusBadge) {
@@ -79,8 +108,11 @@ const RenologyCamera = (function() {
           }
         });
 
-        // Begin fetching live chunked stream
-        const response = await fetch('/api/camera/stream', {
+        // 1. Acquire secure ephemeral session ticket
+        const ticket = await fetchTicket();
+
+        // 2. Begin fetching live chunked stream with ticket
+        const response = await fetch('/api/camera/stream?ticket=' + encodeURIComponent(ticket), {
           signal: abortController.signal
         });
 
@@ -114,7 +146,7 @@ const RenologyCamera = (function() {
           console.error('[Camera Stream] Playback error:', err);
           if (loadingOverlay) {
             const text = loadingOverlay.querySelector('.camera-loading-text');
-            if (text) text.textContent = 'Camera stream ended or reconnecting...';
+            if (text) text.textContent = err.message || 'Camera stream ended or reconnecting...';
           }
         }
       }
@@ -204,7 +236,7 @@ const RenologyCamera = (function() {
         const top = (window.screen.height - popH) / 2;
         window.open(
           'camera.html',
-          'RenologyCabinCamera',
+          'RenologyCottageCamera',
           `width=${popW},height=${popH},left=${left},top=${top},resizable=yes,scrollbars=no,status=no`
         );
       });
