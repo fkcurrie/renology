@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"renology/camera"
 	"renology/models"
 	"renology/storage"
 )
@@ -39,6 +40,12 @@ type Server struct {
 	cachedLatest  *models.Telemetry
 	cachedWeather []byte
 	cachedHistory *models.HistoryResponse
+	cameraRelay   *camera.Relay
+}
+
+// CameraRelay returns the underlying camera streaming relay.
+func (s *Server) CameraRelay() *camera.Relay {
+	return s.cameraRelay
 }
 
 // NewServer creates a new kiosk dashboard web server.
@@ -48,7 +55,8 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	}
 
 	s := &Server{
-		config: cfg,
+		config:      cfg,
+		cameraRelay: camera.NewRelay(),
 	}
 
 	mux := http.NewServeMux()
@@ -60,6 +68,12 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	mux.HandleFunc("/api/telemetry/push", s.handlePushTelemetry)
 	mux.HandleFunc("/api/weather", s.handleWeather)
 	mux.HandleFunc("/api/health", s.handleHealth)
+
+	// Camera streaming endpoints
+	mux.HandleFunc("/api/camera/status", s.handleCameraStatus)
+	mux.HandleFunc("/api/camera/wait-request", s.handleCameraWaitRequest)
+	mux.HandleFunc("/api/camera/ingress", s.handleCameraIngress)
+	mux.HandleFunc("/api/camera/stream", s.handleCameraStream)
 
 	// 2. Embedded Static Assets
 	staticSubFS, err := fs.Sub(staticFiles, "static")
@@ -85,7 +99,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "SAMEORIGIN")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' http://localhost:* http://127.0.0.1:* https://*.run.app")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' blob: data:; connect-src 'self' blob: http://localhost:* http://127.0.0.1:* https://*.run.app https://solar.sfle.ca")
 		mux.ServeHTTP(w, r)
 	})
 
@@ -328,5 +342,96 @@ func (s *Server) handlePushTelemetry(w http.ResponseWriter, r *http.Request) {
 		"status":      "ok",
 		"received_at": time.Now().Format(time.RFC3339),
 	})
+}
+
+// handleCameraStatus returns the current status of the camera relay and viewer count.
+func (s *Server) handleCameraStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	status := s.cameraRelay.GetStatus()
+	resp := map[string]interface{}{
+		"available":         status.Available,
+		"active":            status.Active,
+		"viewers":           status.Viewers,
+		"resolution":        status.Resolution,
+		"video_source":      status.VideoSource,
+		"bytes_streamed":    status.BytesStreamed,
+		"stream_uptime_sec": status.StreamUptime,
+		"is_cloud_relay":    s.config.CloudRelay,
+	}
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// handleCameraWaitRequest is long-polled by the edge worker to wait for active viewers.
+func (s *Server) handleCameraWaitRequest(w http.ResponseWriter, r *http.Request) {
+	if s.config.CloudToken != "" || s.config.CloudRelay {
+		token := r.Header.Get("X-Renology-Token")
+		if token == "" {
+			authHeader := r.Header.Get("Authorization")
+			token = strings.TrimPrefix(authHeader, "Bearer ")
+		}
+		if s.config.CloudToken != "" && subtle.ConstantTimeCompare([]byte(token), []byte(s.config.CloudToken)) != 1 {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+	}
+
+	// Disable HTTP write timeout for long polling
+	rc := http.NewResponseController(w)
+	_ = rc.SetWriteDeadline(time.Time{})
+
+	shouldStream := s.cameraRelay.WaitForStreamRequest(r.Context(), 25*time.Second)
+	if shouldStream {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]string{"action": "start"})
+	} else {
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// handleCameraIngress receives the live fMP4 byte stream from the Edge host.
+func (s *Server) handleCameraIngress(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"POST method required"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.config.CloudToken != "" || s.config.CloudRelay {
+		token := r.Header.Get("X-Renology-Token")
+		if token == "" {
+			authHeader := r.Header.Get("Authorization")
+			token = strings.TrimPrefix(authHeader, "Bearer ")
+		}
+		if s.config.CloudToken != "" && subtle.ConstantTimeCompare([]byte(token), []byte(s.config.CloudToken)) != 1 {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+	}
+
+	// Disable read and write deadlines for long-lived media ingestion
+	rc := http.NewResponseController(w)
+	_ = rc.SetReadDeadline(time.Time{})
+	_ = rc.SetWriteDeadline(time.Time{})
+
+	if err := s.cameraRelay.HandleIngress(r.Context(), r.Body); err != nil {
+		log.Printf("[Web] Camera ingress error: %v", err)
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "completed"})
+}
+
+// handleCameraStream serves the live fragmented MP4 stream to web browsers via HTTP chunked transfer.
+func (s *Server) handleCameraStream(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	// Disable write timeout for continuous streaming
+	rc := http.NewResponseController(w)
+	_ = rc.SetWriteDeadline(time.Time{})
+
+	s.cameraRelay.ServeHTTPStream(w, r)
 }
 

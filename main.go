@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"renology/camera"
 	"renology/models"
 	"renology/renogy"
 	"renology/storage"
@@ -154,6 +155,23 @@ func main() {
 			defer wg.Done()
 			startCloudPusher(ctx, *cloudURL, *cloudToken, store, time.Duration(*pollSec)*time.Second, *verbose)
 		}()
+	}
+
+	// 2b. Start Edge Camera Worker if not running in cloud relay mode
+	if !*cloudRelay {
+		targetURL := *cloudURL
+		if targetURL == "" && *httpAddr != "" {
+			targetURL = "http://localhost" + *httpAddr
+		}
+		if targetURL != "" {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				time.Sleep(1 * time.Second)
+				worker := camera.NewEdgeWorker(targetURL, *cloudToken, nil)
+				worker.Start(ctx)
+			}()
+		}
 	}
 
 	// 3. Run Poller or Web-Only Mode

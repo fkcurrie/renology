@@ -291,3 +291,58 @@ func TestCloudRelayPush(t *testing.T) {
 	}
 }
 
+func TestCameraEndpoints(t *testing.T) {
+	server, err := NewServer(ServerConfig{
+		ListenAddr: ":0",
+		CloudToken: "cam-secret-456",
+		CloudRelay: true,
+	})
+	if err != nil {
+		t.Fatalf("NewServer failed: %v", err)
+	}
+
+	// 1. Test GET /api/camera/status
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/camera/status", nil)
+	server.httpServer.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected GET /api/camera/status 200 OK, got %d", rec.Code)
+	}
+	var camStatus map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &camStatus); err != nil {
+		t.Fatalf("Failed to parse camera status JSON: %v", err)
+	}
+	if camStatus["available"] != true {
+		t.Errorf("Expected available=true in camera status")
+	}
+	if camStatus["is_cloud_relay"] != true {
+		t.Errorf("Expected is_cloud_relay=true")
+	}
+
+	// 2. Test POST /api/camera/ingress without token (should be 401 Unauthorized)
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("POST", "/api/camera/ingress", strings.NewReader("fake fmp4 data"))
+	server.httpServer.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("Expected 401 Unauthorized without token, got %d", rec.Code)
+	}
+
+	// 3. Test POST /api/camera/ingress with invalid token (should be 401)
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("POST", "/api/camera/ingress", strings.NewReader("fake fmp4 data"))
+	req.Header.Set("X-Renology-Token", "wrong-token")
+	server.httpServer.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("Expected 401 Unauthorized with wrong token, got %d", rec.Code)
+	}
+
+	// 4. Test GET /api/camera/wait-request without token (should be 401)
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("GET", "/api/camera/wait-request", nil)
+	server.httpServer.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("Expected 401 Unauthorized for wait-request without token, got %d", rec.Code)
+	}
+}
+
