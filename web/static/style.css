@@ -2030,3 +2030,11 @@ html, body {
   background: rgba(56, 189, 248, 0.1);
 }
 
+
+/* Surface Go 2 Fanless Thermal Optimization: Zero GPU & WebRender Churn when Screen is Asleep */
+body.screen-asleep *,
+body.screen-asleep *::before,
+body.screen-asleep *::after {
+  animation: none !important;
+  transition: none !important;
+}

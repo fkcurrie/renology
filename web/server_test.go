@@ -109,6 +109,22 @@ func TestWebServerEndpoints(t *testing.T) {
 		t.Errorf("Expected model RNG-CTRL-RVR20, got %s", telem.Model)
 	}
 
+	// Test 4b: GET /api/display
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("GET", "/api/display", nil)
+	server.httpServer.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected GET /api/display 200 OK, got %d", rec.Code)
+	}
+	var dispResp map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &dispResp); err != nil {
+		t.Fatalf("Failed to parse /api/display JSON: %v", err)
+	}
+	if _, ok := dispResp["screen_asleep"]; !ok {
+		t.Errorf("Expected screen_asleep in /api/display response")
+	}
+
 	// Test 5: GET /api/history
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest("GET", "/api/history", nil)

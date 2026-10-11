@@ -86,6 +86,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	mux.HandleFunc("/api/telemetry/push", s.handlePushTelemetry)
 	mux.HandleFunc("/api/weather", s.handleWeather)
 	mux.HandleFunc("/api/health", s.handleHealth)
+	mux.HandleFunc("/api/display", s.handleDisplay)
 
 	// Camera streaming endpoints
 	mux.HandleFunc("/api/camera/status", s.handleCameraStatus)
@@ -257,6 +258,44 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 // handleWeather proxies telemetry from the local weather station HTTP server (port 8088),
 // or returns cached weather data when running in cloud relay mode.
+
+// handleDisplay returns the physical screen power status (screen asleep or awake) on the edge host.
+func (s *Server) handleDisplay(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	asleep := false
+
+	// 1. Check flag file maintained by surface-motion-wake daemon
+	if _, err := os.Stat("/run/user/1000/screen_asleep"); err == nil {
+		asleep = true
+	}
+
+	// 2. Direct DRM DPMS query fallback
+	if !asleep {
+		if data, err := os.ReadFile("/sys/class/drm/card1-eDP-1/dpms"); err == nil {
+			if strings.TrimSpace(strings.ToLower(string(data))) == "off" {
+				asleep = true
+			}
+		}
+	}
+
+	// 3. Backlight brightness query fallback
+	if !asleep {
+		if data, err := os.ReadFile("/sys/class/backlight/intel_backlight/actual_brightness"); err == nil {
+			if strings.TrimSpace(string(data)) == "0" {
+				asleep = true
+			}
+		}
+	}
+
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"screen_asleep": asleep,
+		"time":          time.Now().Format(time.RFC3339),
+	})
+}
+
 func (s *Server) handleWeather(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")

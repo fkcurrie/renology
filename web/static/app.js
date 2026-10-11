@@ -3046,17 +3046,82 @@
   // Surface Go 2 Power Optimization: Pause polling when screen is sleeping or tab is hidden
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
-      clearInterval(statusInterval);
-      clearInterval(weatherInterval);
-      clearInterval(historyInterval);
+      if (statusInterval) { clearInterval(statusInterval); statusInterval = null; }
+      if (weatherInterval) { clearInterval(weatherInterval); weatherInterval = null; }
+      if (historyInterval) { clearInterval(historyInterval); historyInterval = null; }
     } else {
-      fetchStatus();
-      fetchWeather();
-      fetchHistory();
-      statusInterval = setInterval(fetchStatus, 5000);
-      weatherInterval = setInterval(fetchWeather, 10000);
-      historyInterval = setInterval(fetchHistory, 60000);
+      if (!isKioskAsleep) {
+        fetchStatus();
+        fetchWeather();
+        fetchHistory();
+        if (!statusInterval) statusInterval = setInterval(fetchStatus, 5000);
+        if (!weatherInterval) weatherInterval = setInterval(fetchWeather, 10000);
+        if (!historyInterval) historyInterval = setInterval(fetchHistory, 60000);
+      }
     }
   });
+
+  // =========================================================================
+  // SURFACE GO 2 FANLESS THERMAL OPTIMIZATION (DPMS SCREEN SLEEP SYNC)
+  // =========================================================================
+  // When the tablet display turns off (DPMS), X11 does not dispatch HTML5 visibility
+  // events (document.hidden stays false). To prevent Firefox WebRender from burning
+  // CPU/thermals in the dark, we sync with /api/display on localhost kiosk sessions.
+  const isLocalKiosk = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+  let isKioskAsleep = false;
+
+  function sleepKiosk() {
+    if (isKioskAsleep) return;
+    isKioskAsleep = true;
+    document.body.classList.add('screen-asleep');
+    if (needleAnimId) {
+      cancelAnimationFrame(needleAnimId);
+      needleAnimId = null;
+    }
+    if (statusInterval) { clearInterval(statusInterval); statusInterval = null; }
+    if (weatherInterval) { clearInterval(weatherInterval); weatherInterval = null; }
+    if (historyInterval) { clearInterval(historyInterval); historyInterval = null; }
+  }
+
+  function wakeKiosk() {
+    if (!isKioskAsleep) return;
+    isKioskAsleep = false;
+    document.body.classList.remove('screen-asleep');
+    if (!statusInterval) statusInterval = setInterval(fetchStatus, 5000);
+    if (!weatherInterval) weatherInterval = setInterval(fetchWeather, 10000);
+    if (!historyInterval) historyInterval = setInterval(fetchHistory, 60000);
+    fetchStatus();
+    fetchWeather();
+    fetchHistory();
+    triggerNeedleAnimation();
+  }
+
+  async function checkDisplayState() {
+    if (!isLocalKiosk) return;
+    try {
+      const res = await fetch('/api/display');
+      if (res.ok) {
+        const info = await res.json();
+        if (info.screen_asleep && !isKioskAsleep) {
+          sleepKiosk();
+        } else if (!info.screen_asleep && isKioskAsleep) {
+          wakeKiosk();
+        }
+      }
+    } catch (_) {}
+  }
+
+  if (isLocalKiosk) {
+    // Poll display state every 3 seconds
+    setInterval(checkDisplayState, 3000);
+
+    // Instant wake on physical touchscreen tap, mouse movement, or keypress
+    ['pointerdown', 'touchstart', 'mousedown', 'keydown'].forEach(evt => {
+      window.addEventListener(evt, () => {
+        if (isKioskAsleep) wakeKiosk();
+      }, { passive: true });
+    });
+  }
+
 
 })();
