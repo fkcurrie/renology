@@ -7,6 +7,8 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"os/exec"
 	"strings"
 	"time"
 )
@@ -117,12 +119,51 @@ func (w *EdgeWorker) checkViewerWait(ctx context.Context) (bool, error) {
 	return false, nil
 }
 
+func (w *EdgeWorker) prepareCameraHardware() {
+	// If the display is asleep, surface-motion-wake.service holds the OV5693 camera sensor.
+	// Wake the display via DPMS to signal surface-motion-wake to release the sensor immediately.
+	asleepFlag := "/run/user/1000/screen_asleep"
+	wasAsleep := false
+	if _, err := os.Stat(asleepFlag); err == nil {
+		wasAsleep = true
+	}
+
+	cmd := exec.Command("xset", "-display", ":0", "dpms", "force", "on")
+	if err := cmd.Run(); err != nil {
+		log.Printf("[Camera Edge] Note: xset display wake: %v", err)
+	}
+
+	if wasAsleep {
+		log.Println("[Camera Edge] Display was asleep. Woke display; pausing 1s for motion-wake to release camera sensor...")
+		time.Sleep(1000 * time.Millisecond)
+	}
+}
+
 func (w *EdgeWorker) streamToCloud(ctx context.Context) error {
+	// Ensure camera hardware is free and screen is awake
+	w.prepareCameraHardware()
+
 	stdout, err := w.pipeline.Start(ctx)
 	if err != nil {
 		return fmt.Errorf("pipeline start error: %w", err)
 	}
 	defer w.pipeline.Stop()
+
+	// Keep display awake during active streaming so motion-wake doesn't try to reclaim camera
+	keepAwakeCtx, cancelKeepAwake := context.WithCancel(ctx)
+	defer cancelKeepAwake()
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-keepAwakeCtx.Done():
+				return
+			case <-ticker.C:
+				_ = exec.Command("xset", "-display", ":0", "dpms", "force", "on").Run()
+			}
+		}
+	}()
 
 	ingressURL := fmt.Sprintf("%s/api/camera/ingress", w.cloudURL)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ingressURL, stdout)

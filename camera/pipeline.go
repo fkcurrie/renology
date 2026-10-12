@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -60,6 +61,11 @@ func NewPipeline(cfg PipelineConfig) *Pipeline {
 	}
 	if cfg.VideoSource == "" {
 		cfg.VideoSource = DetectAvailableSource()
+	}
+	if cfg.VideoSource == SourceLibcamera && cfg.CameraName == "" {
+		// Default to front camera on Surface Go 2 (OV5693 / CSI-2 receiver 1)
+		// Double-escaped for GStreamer CLI parser
+		cfg.CameraName = `\\\\_SB_.PCI0.LNK1`
 	}
 
 	return &Pipeline{
@@ -131,13 +137,13 @@ func (p *Pipeline) BuildGStreamerArgs() []string {
 	switch p.config.VideoSource {
 	case SourceLibcamera:
 		camName := p.config.CameraName
-		if camName != "" {
-			videoSrc = fmt.Sprintf("libcamerasrc camera-name='%s' ! video/x-raw,width=%d,height=%d,framerate=%d/1",
-				camName, p.config.Width, p.config.Height, p.config.Framerate)
-		} else {
-			videoSrc = fmt.Sprintf("libcamerasrc ! video/x-raw,width=%d,height=%d,framerate=%d/1",
-				p.config.Width, p.config.Height, p.config.Framerate)
+		if camName == "" {
+			camName = `\\\\_SB_.PCI0.LNK1`
+		} else if strings.HasPrefix(camName, `\_SB`) && !strings.HasPrefix(camName, `\\\\_SB`) {
+			camName = `\\` + camName
 		}
+		videoSrc = fmt.Sprintf("libcamerasrc camera-name='%s' ! video/x-raw,width=%d,height=%d,framerate=%d/1",
+			camName, p.config.Width, p.config.Height, p.config.Framerate)
 
 	case SourceV4L2:
 		dev := p.config.DevicePath
