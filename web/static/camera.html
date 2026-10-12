@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Renology Cottage Live Camera</title>
-  <link rel="stylesheet" href="style.css?v=2.7.0">
+  <link rel="stylesheet" href="style.css?v=2.8.0">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📹</text></svg>">
   <style>
     body.camera-popout-body {
@@ -52,8 +52,9 @@
 <body class="camera-popout-body">
   <header class="popout-header">
     <div class="camera-modal-title">
+      <a href="/" class="camera-back-btn" id="cameraBackBtn" title="Return to Solar Telemetry Dashboard">← Dashboard</a>
       <span class="camera-live-badge" id="cameraStatusBadge">● CONNECTING</span>
-      <span class="camera-title-text">RENOLOGY COTTAGE CAM</span>
+      <span class="camera-title-text">COTTAGE CAM</span>
       <span class="camera-meta-pill" id="cameraResPill">720p HD • 30fps</span>
     </div>
     <div class="camera-header-actions">
@@ -62,6 +63,7 @@
   </header>
 
   <main class="popout-video-container">
+    <button id="cameraFloatingExitBtn" class="camera-floating-exit-btn" title="Exit Fullscreen Mode">✕ Exit Fullscreen</button>
     <video id="cameraVideo" autoplay muted playsinline></video>
     <div class="camera-loading-overlay" id="cameraLoadingOverlay">
       <div class="camera-spinner"></div>
@@ -83,7 +85,7 @@
     </div>
   </footer>
 
-  <script src="camera.js?v=2.7.0"></script>
+  <script src="camera.js?v=2.8.0"></script>
   <script>
     function launch() {
       if (window.RenologyCamera) {

@@ -291,7 +291,7 @@ const RenologyCamera = (function() {
       });
     }
 
-    // Fullscreen Toggle
+    // Fullscreen Toggle & Floating Exit Button
     if (fullscreenBtn) {
       fullscreenBtn.addEventListener('click', () => {
         if (!document.fullscreenElement) {
@@ -304,6 +304,26 @@ const RenologyCamera = (function() {
         }
       });
     }
+
+    const overlayExitBtn = document.getElementById('cameraOverlayExitBtn');
+    if (overlayExitBtn) {
+      overlayExitBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (document.fullscreenElement) {
+          document.exitFullscreen().catch(() => {});
+        } else {
+          closeModal();
+        }
+      });
+    }
+
+    document.addEventListener('fullscreenchange', () => {
+      if (document.fullscreenElement) {
+        if (fullscreenBtn) fullscreenBtn.textContent = '✕ Exit Fullscreen';
+      } else {
+        if (fullscreenBtn) fullscreenBtn.textContent = '⛶ Fullscreen';
+      }
+    });
 
     // Audio Toggle
     function updateAudioUI(muted) {
@@ -382,6 +402,16 @@ const RenologyCamera = (function() {
       });
     }
 
+    const floatExitBtn = document.getElementById('cameraFloatingExitBtn');
+    if (floatExitBtn) {
+      floatExitBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (document.fullscreenElement) {
+          document.exitFullscreen().catch(() => {});
+        }
+      });
+    }
+
     if (fullscreenBtn) {
       fullscreenBtn.addEventListener('click', () => {
         if (!document.fullscreenElement) {
@@ -391,6 +421,14 @@ const RenologyCamera = (function() {
         }
       });
     }
+
+    document.addEventListener('fullscreenchange', () => {
+      if (document.fullscreenElement) {
+        if (fullscreenBtn) fullscreenBtn.textContent = '✕ Exit Fullscreen';
+      } else {
+        if (fullscreenBtn) fullscreenBtn.textContent = '⛶ Fullscreen';
+      }
+    });
 
     startStream(videoEl, overlay, statusBadge);
 
