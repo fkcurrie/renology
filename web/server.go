@@ -21,6 +21,9 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
+
 	"renology/camera"
 	"renology/models"
 	"renology/storage"
@@ -123,13 +126,16 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		mux.ServeHTTP(w, r)
 	})
 
+	h2s := &http2.Server{
+		MaxConcurrentStreams: 250,
+	}
+	h2Handler := h2c.NewHandler(secureHandler, h2s)
+
 	s.httpServer = &http.Server{
 		Addr:              cfg.ListenAddr,
-		Handler:           secureHandler,
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       60 * time.Second,
+		Handler:           h2Handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
 		MaxHeaderBytes:    64 * 1024,
 	}
 
