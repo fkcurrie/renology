@@ -97,7 +97,13 @@ const RenologyCamera = (function() {
 
         sourceBuffer.addEventListener('updateend', () => {
           if (queue.length > 0 && !sourceBuffer.updating) {
-            sourceBuffer.appendBuffer(queue.shift());
+            try {
+              sourceBuffer.appendBuffer(queue.shift());
+            } catch (e) {}
+          }
+
+          if (videoEl.paused) {
+            videoEl.play().catch(() => {});
           }
 
           // Prune buffer to keep latency minimal (< 5s memory window)
@@ -131,6 +137,9 @@ const RenologyCamera = (function() {
           }
         };
 
+        // Ensure muted for reliable autoplay policy
+        videoEl.muted = true;
+
         while (isStreaming) {
           const { done, value } = await reader.read();
           if (done) break;
@@ -138,7 +147,15 @@ const RenologyCamera = (function() {
           if (sourceBuffer.updating || queue.length > 0) {
             queue.push(value);
           } else {
-            sourceBuffer.appendBuffer(value);
+            try {
+              sourceBuffer.appendBuffer(value);
+            } catch (e) {
+              queue.push(value);
+            }
+          }
+
+          if (videoEl.paused) {
+            videoEl.play().catch(() => {});
           }
         }
       } catch (err) {

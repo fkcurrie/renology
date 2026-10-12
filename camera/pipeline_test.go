@@ -23,8 +23,8 @@ func TestBuildGStreamerArgs(t *testing.T) {
 		t.Fatalf("expected non-empty args")
 	}
 
-	if args[0] != "-e" {
-		t.Errorf("expected first arg to be -e, got %s", args[0])
+	if args[0] != "-q" || args[1] != "-e" {
+		t.Errorf("expected args to start with -q -e, got %v", args[:2])
 	}
 
 	foundMux := false

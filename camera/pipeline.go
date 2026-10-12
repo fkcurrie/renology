@@ -138,14 +138,14 @@ func (p *Pipeline) BuildGStreamerArgs() []string {
 	case SourceLibcamera:
 		camName := p.config.CameraName
 		if camName == "" {
-			camName = `\\\\_SB_.PCI0.LNK1`
-		} else if strings.HasPrefix(camName, `\_SB`) && !strings.HasPrefix(camName, `\\\\_SB`) {
-			camName = `\\` + camName
+			camName = "_SB_.PCI0.LNK1"
 		}
+		cleanName := strings.TrimLeft(camName, `\`)
+		gstCamName := "\\\\" + cleanName
 		videoSrc = fmt.Sprintf("libcamerasrc camera-name='%s' ! video/x-raw,width=%d,height=%d,framerate=%d/1",
-			camName, p.config.Width, p.config.Height, p.config.Framerate)
+			gstCamName, p.config.Width, p.config.Height, p.config.Framerate)
 
-	case SourceV4L2:
+		case SourceV4L2:
 		dev := p.config.DevicePath
 		if dev == "" {
 			dev = "/dev/video0"
@@ -159,7 +159,9 @@ func (p *Pipeline) BuildGStreamerArgs() []string {
 	}
 
 	// Hardware VA-API encoding is tested and verified on Intel UHD 615 GPU
+	// -q is critical to prevent gst-launch from printing status text to stdout (which corrupts fMP4 stream)
 	args := []string{
+		"-q",
 		"-e",
 	}
 
