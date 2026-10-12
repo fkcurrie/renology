@@ -189,8 +189,8 @@ func (p *Pipeline) BuildGStreamerArgs() []string {
 		"-e",
 	}
 
-	// Video Branch: source -> VAAPI H.264 encode -> parse -> queue -> muxer
-	videoPipeline := fmt.Sprintf("%s ! vaapih264enc ! h264parse ! queue ! mux.video_0", videoSrc)
+	// Video Branch: source -> VAAPI H.264 encode (2 Mbps CBR, 1s keyframes) -> parse -> queue -> muxer
+	videoPipeline := fmt.Sprintf("%s ! vaapih264enc bitrate=2000 keyframe-period=30 ! h264parse ! queue ! mux.video_0", videoSrc)
 
 	// Audio Branch: PulseAudio/PipeWire -> convert -> AAC encode -> parse -> queue -> muxer
 	audioPipeline := "pulsesrc ! audioconvert ! avenc_aac bitrate=128000 ! aacparse ! queue ! mux.audio_0"

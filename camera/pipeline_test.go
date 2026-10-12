@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"io"
 	"testing"
 	"time"
 )
@@ -160,4 +161,73 @@ func TestDetectAvailableSource(t *testing.T) {
 	if src != SourceLibcamera && src != SourceV4L2 && src != SourceTest {
 		t.Errorf("unexpected VideoSourceType returned: %v", src)
 	}
+}
+
+func makeBox(boxType string, payload []byte) []byte {
+	size := len(payload) + 8
+	buf := make([]byte, size)
+	binary.BigEndian.PutUint32(buf[0:4], uint32(size))
+	copy(buf[4:8], boxType)
+	copy(buf[8:], payload)
+	return buf
+}
+
+func TestRelayBoxAlignedIngress(t *testing.T) {
+	relay := NewRelay()
+	relay.gracePeriod = 100 * time.Millisecond
+
+	// Prepare synthetic boxes
+	ftyp := makeBox("ftyp", []byte("isom0001"))
+	moov := makeBox("moov", []byte("fake_moov_metadata"))
+	moof := makeBox("moof", []byte("fake_fragment_header"))
+	mdat := makeBox("mdat", []byte("fake_media_payload_sample_data"))
+
+	pr, pw := io.Pipe()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ingressErr := make(chan error, 1)
+	go func() {
+		ingressErr <- relay.HandleIngress(ctx, pr)
+	}()
+
+	// 1. Write ftyp and moov
+	_, _ = pw.Write(ftyp)
+	_, _ = pw.Write(moov)
+
+	time.Sleep(20 * time.Millisecond)
+
+	// 2. Register viewer mid-stream
+	sub, initBurst := relay.RegisterViewer()
+	if len(initBurst) == 0 {
+		t.Fatalf("expected non-empty initBurst, got 0 bytes")
+	}
+
+	expectedInitLen := len(ftyp) + len(moov)
+	if len(initBurst) < expectedInitLen {
+		t.Fatalf("expected at least %d bytes in initBurst, got %d", expectedInitLen, len(initBurst))
+	}
+
+	// 3. Write fragment 1
+	_, _ = pw.Write(moof)
+	_, _ = pw.Write(mdat)
+
+	select {
+	case frag := <-sub:
+		expectedFragLen := len(moof) + len(mdat)
+		if len(frag) != expectedFragLen {
+			t.Errorf("expected fragment len %d, got %d", expectedFragLen, len(frag))
+		}
+		// Verify box headers
+		boxType := string(frag[4:8])
+		if boxType != "moof" {
+			t.Errorf("expected fragment to start with moof, got %s", boxType)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatalf("timed out waiting for complete fragment on subscriber channel")
+	}
+
+	pw.Close()
+	cancel()
 }

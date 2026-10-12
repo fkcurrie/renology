@@ -1,7 +1,6 @@
 package camera
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -30,6 +29,7 @@ type Relay struct {
 	subscribers   map[chan []byte]struct{}
 	initSegment   []byte
 	hasInit       bool
+	lastFragment  []byte
 	activeViewers int
 	bytesStreamed int64
 	streamStart   time.Time
@@ -112,7 +112,7 @@ func (r *Relay) RegisterViewer() (chan []byte, []byte) {
 	}
 
 	r.activeViewers++
-	sub := make(chan []byte, 64)
+	sub := make(chan []byte, 32)
 	r.subscribers[sub] = struct{}{}
 
 	// Signal trigger channel if viewers transition from 0 -> 1
@@ -123,14 +123,18 @@ func (r *Relay) RegisterViewer() (chan []byte, []byte) {
 		}
 	}
 
-	// Copy init segment if already sniffed
-	var initCopy []byte
+	// Prepare initial burst: initSegment + lastFragment (if available)
+	var initBurst []byte
 	if r.hasInit && len(r.initSegment) > 0 {
-		initCopy = make([]byte, len(r.initSegment))
-		copy(initCopy, r.initSegment)
+		burstLen := len(r.initSegment) + len(r.lastFragment)
+		initBurst = make([]byte, burstLen)
+		copy(initBurst, r.initSegment)
+		if len(r.lastFragment) > 0 {
+			copy(initBurst[len(r.initSegment):], r.lastFragment)
+		}
 	}
 
-	return sub, initCopy
+	return sub, initBurst
 }
 
 // UnregisterViewer decrements active viewer count and triggers stop grace timer if 0.
@@ -167,6 +171,37 @@ func (r *Relay) UnregisterViewer(sub chan []byte) {
 	}
 }
 
+// readBox reads a single complete ISO BMFF box from reader.
+func readBox(r io.Reader) (string, []byte, error) {
+	var header [8]byte
+	if _, err := io.ReadFull(r, header[:]); err != nil {
+		return "", nil, err
+	}
+	boxSize := binary.BigEndian.Uint32(header[0:4])
+	boxType := string(header[4:8])
+
+	if boxSize < 8 {
+		return "", nil, fmt.Errorf("invalid box size %d for box %s", boxSize, boxType)
+	}
+
+	// Safety cap: single box cannot exceed 20MB
+	if boxSize > 20*1024*1024 {
+		return "", nil, fmt.Errorf("box size %d exceeds safety limit for box %s", boxSize, boxType)
+	}
+
+	boxData := make([]byte, boxSize)
+	copy(boxData[:8], header[:])
+	payloadSize := int(boxSize) - 8
+
+	if payloadSize > 0 {
+		if _, err := io.ReadFull(r, boxData[8:]); err != nil {
+			return "", nil, fmt.Errorf("failed to read payload for box %s (%d bytes): %w", boxType, payloadSize, err)
+		}
+	}
+
+	return boxType, boxData, nil
+}
+
 // HandleIngress processes the live fMP4 byte stream from Edge.
 func (r *Relay) HandleIngress(ctx context.Context, reader io.Reader) error {
 	r.mu.Lock()
@@ -175,66 +210,108 @@ func (r *Relay) HandleIngress(ctx context.Context, reader io.Reader) error {
 	r.bytesStreamed = 0
 	r.hasInit = false
 	r.initSegment = nil
+	r.lastFragment = nil
 	r.mu.Unlock()
 
 	defer func() {
 		r.mu.Lock()
 		r.isStreaming = false
+		for sub := range r.subscribers {
+			close(sub)
+			delete(r.subscribers, sub)
+		}
 		r.mu.Unlock()
 		log.Println("[Camera Relay] Ingress stream completed.")
 	}()
 
-	log.Println("[Camera Relay] Ingress stream connected. Reading fMP4 chunks...")
+	log.Println("[Camera Relay] Ingress stream connected. Reading box-aligned fMP4 stream...")
 
-	buf := make([]byte, 32*1024)
-	var headerBuf bytes.Buffer
+	var initBuf []byte
+	var currentMoof []byte
+
+	// Background worker to monitor stopChan or context
+	stopDone := make(chan struct{})
+	defer close(stopDone)
+	go func() {
+		select {
+		case <-ctx.Done():
+		case <-r.stopChan:
+			log.Println("[Camera Relay] Stopping ingress stream due to inactivity.")
+		case <-stopDone:
+		}
+	}()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-r.stopChan:
-			log.Println("[Camera Relay] Stopping ingress stream due to inactivity.")
 			return nil
 		default:
 		}
 
-		n, err := reader.Read(buf)
-		if n > 0 {
-			chunk := make([]byte, n)
-			copy(chunk, buf[:n])
-
-			r.mu.Lock()
-			r.bytesStreamed += int64(n)
-
-			// 1. Sniff MP4 initialization box (ftyp + moov) if not yet identified
-			if !r.hasInit {
-				headerBuf.Write(chunk)
-				initData, found := extractFMP4Init(headerBuf.Bytes())
-				if found {
-					r.initSegment = initData
-					r.hasInit = true
-					log.Printf("[Camera Relay] Captured fMP4 init segment (%d bytes). Ready for browsers.", len(initData))
-				}
-			}
-
-			// 2. Broadcast chunk to all active subscribers
-			for sub := range r.subscribers {
-				select {
-				case sub <- chunk:
-				default:
-					// Subscriber channel full, drop frame to maintain real-time latency
-				}
-			}
-			r.mu.Unlock()
-		}
-
+		boxType, boxData, err := readBox(reader)
 		if err != nil {
 			if err == io.EOF {
 				return nil
 			}
 			return fmt.Errorf("ingress read error: %w", err)
 		}
+
+		r.mu.Lock()
+		r.bytesStreamed += int64(len(boxData))
+
+		switch boxType {
+		case "ftyp":
+			initBuf = append(initBuf, boxData...)
+		case "moov":
+			initBuf = append(initBuf, boxData...)
+			r.initSegment = make([]byte, len(initBuf))
+			copy(r.initSegment, initBuf)
+			r.hasInit = true
+			log.Printf("[Camera Relay] Captured fMP4 init segment (%d bytes). Ready for browsers.", len(r.initSegment))
+
+			// Deliver initSegment immediately to any subscribers waiting before hasInit
+			for sub := range r.subscribers {
+				initCopy := make([]byte, len(r.initSegment))
+				copy(initCopy, r.initSegment)
+				select {
+				case sub <- initCopy:
+				default:
+				}
+			}
+
+		case "moof":
+			currentMoof = boxData
+
+		case "mdat":
+			if len(currentMoof) > 0 {
+				fragment := make([]byte, len(currentMoof)+len(boxData))
+				copy(fragment, currentMoof)
+				copy(fragment[len(currentMoof):], boxData)
+				currentMoof = nil
+
+				// Cache last fragment for instant playback on new viewer joins
+				r.lastFragment = fragment
+
+				// Broadcast complete fragment to all active subscribers
+				for sub := range r.subscribers {
+					select {
+					case sub <- fragment:
+					default:
+						// Subscriber channel full, drop fragment to keep real-time latency
+					}
+				}
+			}
+
+		default:
+			if !r.hasInit {
+				initBuf = append(initBuf, boxData...)
+			} else if len(currentMoof) > 0 {
+				currentMoof = append(currentMoof, boxData...)
+			}
+		}
+		r.mu.Unlock()
 	}
 }
 
@@ -246,7 +323,7 @@ func (r *Relay) ServeHTTPStream(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	sub, initSegment := r.RegisterViewer()
+	sub, initBurst := r.RegisterViewer()
 	defer r.UnregisterViewer(sub)
 
 	// Set streaming headers
@@ -257,9 +334,9 @@ func (r *Relay) ServeHTTPStream(w http.ResponseWriter, req *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
-	// If init segment was already sniffed, send it immediately so decoder starts
-	if len(initSegment) > 0 {
-		if _, err := w.Write(initSegment); err != nil {
+	// If init burst was already sniffed, send it immediately so decoder starts with video instantly
+	if len(initBurst) > 0 {
+		if _, err := w.Write(initBurst); err != nil {
 			return
 		}
 		flusher.Flush()
@@ -270,11 +347,11 @@ func (r *Relay) ServeHTTPStream(w http.ResponseWriter, req *http.Request) {
 		select {
 		case <-ctx.Done():
 			return
-		case chunk, ok := <-sub:
+		case fragment, ok := <-sub:
 			if !ok {
 				return
 			}
-			if _, err := w.Write(chunk); err != nil {
+			if _, err := w.Write(fragment); err != nil {
 				return
 			}
 			flusher.Flush()

@@ -169,11 +169,15 @@ const RenologyCamera = (function() {
           if (done) break;
 
           if (sourceBuffer.updating || queue.length > 0) {
+            if (queue.length > 30) {
+              queue.shift(); // Drop oldest fragment to prevent memory ballooning
+            }
             queue.push(value);
           } else {
             try {
               sourceBuffer.appendBuffer(value);
             } catch (e) {
+              console.warn('[Camera Stream] appendBuffer retry queued:', e);
               queue.push(value);
             }
           }
