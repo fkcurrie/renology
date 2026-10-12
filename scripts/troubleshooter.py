@@ -124,7 +124,14 @@ def attempt_remediation(audit):
             actions_taken.append("Spawned renology binary directly")
         else:
             actions_taken.append("Restarted renology.service via systemctl")
-        time.sleep(4)
+        # Allow sufficient time for BLE scan, GATT handshake, and first telemetry poll (typically 12-18s)
+        log("Waiting for Renology daemon to establish BLE link and post initial telemetry...")
+        for _ in range(12):
+            time.sleep(2)
+            check = health_check.check_renology_pillar()
+            if check.get("status") == "PASS":
+                log(f"Renology daemon established BLE link and verified healthy ({check.get('api_response_ms')}ms, {check.get('battery_soc')}% SOC).")
+                break
 
     # 3. Renology Telemetry Stalled (>180s old)
     elif p_ren.get("age_seconds") and p_ren["age_seconds"] > 180.0:
@@ -136,7 +143,13 @@ def attempt_remediation(audit):
         time.sleep(2)
         subprocess.run(["systemctl", "--user", "restart", "renology.service"], capture_output=True)
         actions_taken.append(f"Cycled Bluetooth radio and restarted renology.service (stalled telemetry was {p_ren['age_seconds']}s old)")
-        time.sleep(8)
+        log("Waiting for Renology daemon to establish BLE link post-radio-reset...")
+        for _ in range(12):
+            time.sleep(2)
+            check = health_check.check_renology_pillar()
+            if check.get("status") == "PASS":
+                log(f"Renology daemon reconnected and verified healthy ({check.get('battery_soc')}% SOC).")
+                break
 
     # 4. Kiosk Display Remediation
     if not p_kio["running"] and p_kio["display_present"]:
@@ -189,6 +202,8 @@ TASK:
     output = ""
     try:
         cmd = [
+            "nice", "-n", "19",
+            "ionice", "-c", "3",
             "/home/fcurrie/.local/bin/agy",
             "--agent", "renology-troubleshooter",
             "--model", "gemini-3.8-flash-high",
