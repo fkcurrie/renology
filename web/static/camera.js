@@ -394,16 +394,7 @@ const RenologyCamera = (function() {
 
     startStream(videoEl, overlay, statusBadge);
 
-    // Auto-manage mobile tab switching: pause on background, reconnect on return
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') {
-        if (!isStreaming) {
-          startStream(videoEl, overlay, statusBadge);
-        }
-      } else {
-        stopStream(videoEl);
-      }
-    });
+
 
     window.addEventListener('beforeunload', () => {
       stopStream(videoEl);
