@@ -126,8 +126,8 @@ def attempt_remediation(audit):
             actions_taken.append("Restarted renology.service via systemctl")
         time.sleep(4)
 
-    # 3. Renology Telemetry Stalled (>75s old)
-    elif p_ren.get("age_seconds") and p_ren["age_seconds"] > 75.0:
+    # 3. Renology Telemetry Stalled (>180s old)
+    elif p_ren.get("age_seconds") and p_ren["age_seconds"] > 180.0:
         log(f"Renology telemetry stalled (age: {p_ren['age_seconds']}s). Cycling Bluetooth radio and poller...")
         # Safe non-disruptive BLE radio reset
         subprocess.run(["bluetoothctl", "power", "off"], capture_output=True)

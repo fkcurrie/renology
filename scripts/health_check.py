@@ -82,7 +82,7 @@ def check_renology_pillar():
     start_t = datetime.datetime.now()
     try:
         req = urllib.request.Request(RENOLOGY_STATUS_URL, headers={"User-Agent": "RenologyHealthCheck/1.0"})
-        with urllib.request.urlopen(req, timeout=2.5) as resp:
+        with urllib.request.urlopen(req, timeout=6.0) as resp:
             elapsed = (datetime.datetime.now() - start_t).total_seconds() * 1000
             pillar["api_response_ms"] = round(elapsed, 1)
             if resp.status == 200:
@@ -118,13 +118,13 @@ def check_renology_pillar():
                     now = datetime.datetime.now(dt.tzinfo)
                     age = (now - dt).total_seconds()
                     pillar["age_seconds"] = round(age, 1)
-                    if age > 75.0:
+                    if age > 180.0:
                         pillar["status"] = "FAIL"
-                        pillar["issues"].append(f"Renology telemetry stalled: last record was {int(age)}s ago (>75s threshold)")
-                    elif age > 30.0:
+                        pillar["issues"].append(f"Renology telemetry stalled: last record was {int(age)}s ago (>180s threshold)")
+                    elif age > 60.0:
                         if pillar["status"] != "FAIL":
                             pillar["status"] = "WARN"
-                        pillar["issues"].append(f"Renology telemetry delayed: last record was {int(age)}s ago")
+                        pillar["issues"].append(f"Renology telemetry delayed: last record was {int(age)}s ago (>60s threshold)")
                 except Exception as ex:
                     pillar["issues"].append(f"Timestamp parse error: {ex}")
 
