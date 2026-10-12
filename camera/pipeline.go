@@ -209,14 +209,14 @@ func (p *Pipeline) BuildGStreamerArgs() []string {
 // Start launches the GStreamer streaming subprocess and returns stdout stream.
 func (p *Pipeline) Start(parentCtx context.Context) (io.ReadCloser, error) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-
 	if p.isRunning {
+		p.mu.Unlock()
 		return nil, fmt.Errorf("camera pipeline is already running")
 	}
 
 	gstBin, err := exec.LookPath("gst-launch-1.0")
 	if err != nil {
+		p.mu.Unlock()
 		return nil, fmt.Errorf("gst-launch-1.0 not found in PATH: %w", err)
 	}
 
@@ -228,6 +228,7 @@ func (p *Pipeline) Start(parentCtx context.Context) (io.ReadCloser, error) {
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		p.mu.Unlock()
 		cancel()
 		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
@@ -235,6 +236,7 @@ func (p *Pipeline) Start(parentCtx context.Context) (io.ReadCloser, error) {
 	cmd.Stderr = os.Stderr // Log GStreamer warnings/errors to daemon logs
 
 	if err := cmd.Start(); err != nil {
+		p.mu.Unlock()
 		cancel()
 		return nil, fmt.Errorf("failed to start gstreamer: %w", err)
 	}
@@ -243,6 +245,7 @@ func (p *Pipeline) Start(parentCtx context.Context) (io.ReadCloser, error) {
 	p.stdout = stdout
 	p.isRunning = true
 	p.startTime = time.Now()
+	p.mu.Unlock()
 
 	log.Printf("[Camera Pipeline] Started GStreamer PID %d (source: %s, %dx%d @ %dfps)",
 		cmd.Process.Pid, p.config.VideoSource, p.config.Width, p.config.Height, p.config.Framerate)
