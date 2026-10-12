@@ -101,15 +101,38 @@ const RenologyCamera = (function() {
             } catch (e) {}
           }
 
+          // Crucial for reloads: If video currentTime is at 0 or behind the live buffer, seek to live edge!
+          if (sourceBuffer.buffered.length > 0) {
+            const bStart = sourceBuffer.buffered.start(0);
+            const bEnd = sourceBuffer.buffered.end(sourceBuffer.buffered.length - 1);
+            if (videoEl.currentTime < bStart || videoEl.currentTime > bEnd) {
+              videoEl.currentTime = bStart;
+            }
+          }
+
           if (videoEl.paused) {
             videoEl.play().catch(() => {});
           }
 
           // Prune buffer to keep latency minimal (< 5s memory window)
-          if (videoEl.currentTime > 15 && !sourceBuffer.updating) {
-            try {
-              sourceBuffer.remove(0, videoEl.currentTime - 5);
-            } catch (err) {}
+          if (sourceBuffer.buffered.length > 0) {
+            const bStart = sourceBuffer.buffered.start(0);
+            if (videoEl.currentTime - bStart > 8 && !sourceBuffer.updating) {
+              try {
+                sourceBuffer.remove(bStart, videoEl.currentTime - 3);
+              } catch (err) {}
+            }
+          }
+        });
+
+        // Hide overlay as soon as playback advances
+        videoEl.addEventListener('timeupdate', () => {
+          if (videoEl.currentTime > 0) {
+            if (loadingOverlay) loadingOverlay.style.display = 'none';
+            if (statusBadge) {
+              statusBadge.textContent = '● LIVE';
+              statusBadge.className = 'camera-live-badge';
+            }
           }
         });
 
