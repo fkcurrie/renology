@@ -12,7 +12,7 @@ echo "================================================="
 # Check if renology web daemon is already running
 if ! pgrep -f "renology.*-http" >/dev/null; then
   echo "Starting Renology engine (BLE Poller + Web Server)..."
-  ./renology -mac 60:98:66:F9:84:D6 -interval 5 -out ./data -http :8080 > renology.log 2>&1 &
+  ./renology -mac 60:98:66:F9:84:D6 -interval 15 -out ./data -http :8080 > renology.log 2>&1 &
   sleep 2
 fi
 

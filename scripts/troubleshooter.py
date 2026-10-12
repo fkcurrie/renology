@@ -119,7 +119,7 @@ def attempt_remediation(audit):
         res = subprocess.run(["systemctl", "--user", "restart", "renology.service"], capture_output=True, text=True)
         if res.returncode != 0:
             # Fallback to direct background launch if unit not active yet
-            cmd = ["/home/fcurrie/Projects/renology/renology", "-mac", "60:98:66:F9:84:D6", "-interval", "5", "-out", "./data", "-http", ":8080"]
+            cmd = ["/home/fcurrie/Projects/renology/renology", "-mac", "60:98:66:F9:84:D6", "-interval", "15", "-out", "./data", "-http", ":8080"]
             subprocess.Popen(cmd, cwd=str(BASE_DIR), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             actions_taken.append("Spawned renology binary directly")
         else:
