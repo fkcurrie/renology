@@ -228,6 +228,209 @@ const RenologyCamera = (function() {
     }
     mediaSource = null;
     sourceBuffer = null;
+    if (eventPollTimer) {
+      clearInterval(eventPollTimer);
+      eventPollTimer = null;
+    }
+  }
+
+  let currentPlayingEvent = null;
+  let activeFilter = '';
+  let eventPollTimer = null;
+
+  async function loadEvents(filterType) {
+    if (filterType !== undefined) {
+      activeFilter = filterType;
+    }
+    const container = document.getElementById('cameraEventsList');
+    const countBadge = document.getElementById('cameraEventsCount');
+    if (!container) return;
+
+    try {
+      const url = '/api/camera/events' + (activeFilter ? '?type=' + encodeURIComponent(activeFilter) : '');
+      const res = await fetch(url);
+      if (!res.ok) return;
+      const data = await res.json();
+      const events = data.events || [];
+
+      if (countBadge) {
+        countBadge.textContent = `${events.length} clip${events.length === 1 ? '' : 's'}`;
+      }
+
+      if (events.length === 0) {
+        container.innerHTML = '<div class="camera-events-empty">No activity clips recorded yet. Events appear here automatically on sound spikes or motion.</div>';
+        return;
+      }
+
+      container.innerHTML = events.map(evt => {
+        const isSelected = currentPlayingEvent && currentPlayingEvent.id === evt.id;
+        const icon = evt.trigger_type === 'sound' ? '🔊' : (evt.trigger_type === 'motion' ? '🏃' : '📹');
+        const badgeColor = evt.trigger_type === 'sound' ? '#38bdf8' : (evt.trigger_type === 'motion' ? '#10b981' : '#f59e0b');
+        const timeStr = formatEventTime(evt.timestamp);
+        const durationStr = `${Math.round(evt.duration_sec)}s total`;
+        const preRollStr = `${Math.round(evt.pre_roll_sec || 20)}s pre-roll`;
+        const sizeMb = (evt.size_bytes / (1024 * 1024)).toFixed(1) + ' MB';
+
+        return `
+          <div class="camera-event-card ${isSelected ? 'active' : ''}" data-event-id="${escapeHtml(evt.id)}">
+            <div class="camera-event-info">
+              <div class="camera-event-icon" style="border-color: ${badgeColor};">${icon}</div>
+              <div class="camera-event-meta">
+                <span class="camera-event-title">${escapeHtml(evt.title)}</span>
+                <span class="camera-event-subtext">
+                  <span>${escapeHtml(timeStr)}</span> • 
+                  <span class="camera-event-pill">${escapeHtml(preRollStr)}</span> • 
+                  <span>${escapeHtml(durationStr)}</span> • 
+                  <span>${sizeMb}</span>
+                </span>
+              </div>
+            </div>
+            <button class="camera-event-play-btn ${isSelected ? 'playing' : ''}" data-event-id="${escapeHtml(evt.id)}">
+              ${isSelected ? '⏸ Playing' : '▶ Play Clip'}
+            </button>
+          </div>
+        `;
+      }).join('');
+
+      // Attach play listeners
+      container.querySelectorAll('.camera-event-play-btn, .camera-event-card').forEach(el => {
+        el.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const evtId = el.getAttribute('data-event-id');
+          const found = events.find(item => item.id === evtId);
+          if (found) {
+            playEvent(found);
+          }
+        });
+      });
+    } catch (e) {
+      console.warn('[Camera Events] Failed to load events:', e);
+    }
+  }
+
+  function formatEventTime(ts) {
+    if (!ts) return 'Just now';
+    const d = new Date(ts);
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' • ' + d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  }
+
+  function escapeHtml(str) {
+    if (!str) return '';
+    return str.replace(/[&<>'"]/g, tag => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      "'": '&#39;',
+      '"': '&quot;'
+    }[tag] || tag));
+  }
+
+  function playEvent(evt) {
+    currentPlayingEvent = evt;
+    const videoEl = document.getElementById('cameraVideo');
+    const banner = document.getElementById('cameraEventBanner');
+    const bannerText = document.getElementById('cameraEventBannerText');
+    const statusBadge = document.getElementById('cameraStatusBadge');
+    const overlay = document.getElementById('cameraLoadingOverlay');
+
+    if (!videoEl) return;
+
+    // 1. Stop active MSE live stream if running
+    if (isStreaming) {
+      stopStream(videoEl);
+    }
+
+    if (overlay) overlay.style.display = 'none';
+
+    // 2. Point video directly to event MP4 URL
+    videoEl.src = evt.video_url;
+    videoEl.controls = true; // Enable native scrubber for recorded event!
+    videoEl.muted = false;
+    videoEl.currentTime = 0;
+    videoEl.play().catch(() => {});
+
+    // 3. Update status UI
+    if (banner) {
+      banner.style.display = 'flex';
+      if (bannerText) {
+        bannerText.textContent = `⏮ Event Playback: ${evt.title} (${Math.round(evt.duration_sec)}s)`;
+      }
+    }
+
+    if (statusBadge) {
+      statusBadge.textContent = '⏮ CLIP PLAYBACK';
+      statusBadge.className = 'camera-live-badge';
+      statusBadge.style.background = 'rgba(249, 115, 22, 0.2)';
+      statusBadge.style.color = '#fb923c';
+      statusBadge.style.borderColor = 'rgba(249, 115, 22, 0.5)';
+    }
+
+    // Refresh active state in list
+    loadEvents();
+  }
+
+  function returnToLive() {
+    currentPlayingEvent = null;
+    const videoEl = document.getElementById('cameraVideo');
+    const banner = document.getElementById('cameraEventBanner');
+    const statusBadge = document.getElementById('cameraStatusBadge');
+    const overlay = document.getElementById('cameraLoadingOverlay');
+
+    if (!videoEl) return;
+
+    // Reset banner and controls
+    if (banner) banner.style.display = 'none';
+    videoEl.controls = false;
+    if (statusBadge) {
+      statusBadge.style.background = '';
+      statusBadge.style.color = '';
+      statusBadge.style.borderColor = '';
+    }
+
+    // Restart live stream
+    startStream(videoEl, overlay, statusBadge);
+
+    // Refresh active state in list
+    loadEvents();
+  }
+
+  async function triggerManualClip() {
+    const btn = document.getElementById('cameraTriggerClipBtn');
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '⏳ Capturing...';
+    }
+
+    try {
+      const res = await fetch('/api/camera/events/trigger', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'manual',
+          title: 'Manual On-Demand Capture',
+          summary: 'User captured 30s clip with rolling pre-roll context',
+          pre_roll_sec: 30
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        await loadEvents();
+        if (data && data.id) {
+          playEvent(data);
+        }
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || 'Failed to trigger event capture: buffer priming or camera starting');
+      }
+    } catch (e) {
+      alert('Error triggering clip: ' + e);
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = '📸 Record Clip';
+      }
+    }
   }
 
   function initModalView() {
@@ -359,6 +562,31 @@ const RenologyCamera = (function() {
         }
       });
     }
+
+    // Event clips controls wiring
+    const returnLiveBtn = document.getElementById('cameraReturnLiveBtn');
+    if (returnLiveBtn) {
+      returnLiveBtn.addEventListener('click', returnToLive);
+    }
+
+    const triggerClipBtn = document.getElementById('cameraTriggerClipBtn');
+    if (triggerClipBtn) {
+      triggerClipBtn.addEventListener('click', triggerManualClip);
+    }
+
+    modal.querySelectorAll('.camera-filter-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        modal.querySelectorAll('.camera-filter-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        loadEvents(btn.getAttribute('data-filter') || '');
+      });
+    });
+
+    cameraBtn.addEventListener('click', () => {
+      loadEvents('');
+      if (eventPollTimer) clearInterval(eventPollTimer);
+      eventPollTimer = setInterval(() => loadEvents(), 10000);
+    });
   }
 
   function initPopoutView() {
@@ -433,6 +661,29 @@ const RenologyCamera = (function() {
         if (fullscreenBtn) fullscreenBtn.textContent = '⛶ Fullscreen';
       }
     });
+
+    // Event clips controls wiring for Popout View
+    const returnLiveBtn = document.getElementById('cameraReturnLiveBtn');
+    if (returnLiveBtn) {
+      returnLiveBtn.addEventListener('click', returnToLive);
+    }
+
+    const triggerClipBtn = document.getElementById('cameraTriggerClipBtn');
+    if (triggerClipBtn) {
+      triggerClipBtn.addEventListener('click', triggerManualClip);
+    }
+
+    document.querySelectorAll('.camera-filter-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.camera-filter-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        loadEvents(btn.getAttribute('data-filter') || '');
+      });
+    });
+
+    loadEvents('');
+    if (eventPollTimer) clearInterval(eventPollTimer);
+    eventPollTimer = setInterval(() => loadEvents(), 10000);
 
     startStream(videoEl, overlay, statusBadge);
 

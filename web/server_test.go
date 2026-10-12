@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"renology/camera"
 	"renology/models"
 	"renology/storage"
 )
@@ -308,10 +309,22 @@ func TestCloudRelayPush(t *testing.T) {
 }
 
 func TestCameraEndpoints(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "renology_camera_test_*")
+	if err != nil {
+		t.Fatalf("MkdirTemp failed: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	store, err := storage.NewStorage(tempDir)
+	if err != nil {
+		t.Fatalf("NewStorage failed: %v", err)
+	}
+
 	server, err := NewServer(ServerConfig{
 		ListenAddr: ":0",
 		CloudToken: "cam-secret-456",
 		CloudRelay: true,
+		Storage:    store,
 	})
 	if err != nil {
 		t.Fatalf("NewServer failed: %v", err)
@@ -418,6 +431,58 @@ func TestCameraEndpoints(t *testing.T) {
 	edgeServer.httpServer.Handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("Expected 403 Forbidden for ticket request on edge host, got %d", rec.Code)
+	}
+
+	// 10. Test GET /api/camera/events (empty initially)
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("GET", "/api/camera/events", nil)
+	server.httpServer.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK for /api/camera/events, got %d", rec.Code)
+	}
+	var eventsResp map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &eventsResp); err != nil {
+		t.Fatalf("Failed to parse events JSON: %v", err)
+	}
+	if eventsResp["count"] != float64(0) {
+		t.Errorf("Expected 0 events initially, got %v", eventsResp["count"])
+	}
+
+	// 11. Test event saving and retrieval via EventStore
+	testEvt := camera.CameraEvent{
+		TriggerType: "sound",
+		Title:       "Test Sound Spike",
+		DurationSec: 30,
+		PreRollSec:  20,
+	}
+	if err := server.EventStore().Save(testEvt, []byte("fake_mp4_bytes")); err != nil {
+		t.Fatalf("Failed to save event to store: %v", err)
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("GET", "/api/camera/events", nil)
+	server.httpServer.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK for events list after save, got %d", rec.Code)
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &eventsResp)
+	if eventsResp["count"] != float64(1) {
+		t.Errorf("Expected 1 event after save, got %v", eventsResp["count"])
+	}
+
+	eventsList := eventsResp["events"].([]interface{})
+	firstEvt := eventsList[0].(map[string]interface{})
+	evtID := firstEvt["id"].(string)
+
+	// 12. Test GET /api/camera/events/{id}.mp4
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("GET", "/api/camera/events/"+evtID+".mp4", nil)
+	server.httpServer.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK for event media, got %d", rec.Code)
+	}
+	if rec.Body.String() != "fake_mp4_bytes" {
+		t.Errorf("Expected fake_mp4_bytes, got %s", rec.Body.String())
 	}
 }
 

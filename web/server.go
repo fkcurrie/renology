@@ -50,12 +50,18 @@ type Server struct {
 	cachedWeather []byte
 	cachedHistory *models.HistoryResponse
 	cameraRelay   *camera.Relay
+	eventStore    *camera.EventStore
 	ticketSecret  []byte
 }
 
 // CameraRelay returns the underlying camera streaming relay.
 func (s *Server) CameraRelay() *camera.Relay {
 	return s.cameraRelay
+}
+
+// EventStore returns the underlying camera event store.
+func (s *Server) EventStore() *camera.EventStore {
+	return s.eventStore
 }
 
 // NewServer creates a new kiosk dashboard web server.
@@ -74,9 +80,18 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		}
 	}
 
+	baseDir := "./data"
+	if cfg.Storage != nil && cfg.Storage.OutputDir() != "" {
+		baseDir = cfg.Storage.OutputDir()
+	}
+	eventStore := camera.NewEventStore(baseDir)
+	relay := camera.NewRelay()
+	relay.SetEventStore(eventStore)
+
 	s := &Server{
 		config:       cfg,
-		cameraRelay:  camera.NewRelay(),
+		cameraRelay:  relay,
+		eventStore:   eventStore,
 		ticketSecret: secret,
 	}
 
@@ -91,12 +106,15 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	mux.HandleFunc("/api/health", s.handleHealth)
 	mux.HandleFunc("/api/display", s.handleDisplay)
 
-	// Camera streaming endpoints
+	// Camera streaming & event endpoints
 	mux.HandleFunc("/api/camera/status", s.handleCameraStatus)
 	mux.HandleFunc("/api/camera/wait-request", s.handleCameraWaitRequest)
 	mux.HandleFunc("/api/camera/ingress", s.handleCameraIngress)
 	mux.HandleFunc("/api/camera/ticket", s.handleCameraTicket)
 	mux.HandleFunc("/api/camera/stream", s.handleCameraStream)
+	mux.HandleFunc("/api/camera/events", s.handleCameraEvents)
+	mux.HandleFunc("/api/camera/events/", s.handleCameraEventMedia)
+	mux.HandleFunc("/api/camera/events/trigger", s.handleCameraEventTrigger)
 
 	// 2. Embedded Static Assets
 	staticSubFS, err := fs.Sub(staticFiles, "static")
@@ -646,5 +664,157 @@ func (s *Server) handleCameraStream(w http.ResponseWriter, r *http.Request) {
 	_ = rc.SetWriteDeadline(time.Time{})
 
 	s.cameraRelay.ServeHTTPStream(w, r)
+}
+
+// handleCameraEvents handles listing recent recorded events (GET) and uploading events from Edge (POST).
+func (s *Server) handleCameraEvents(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method == http.MethodGet {
+		filterType := r.URL.Query().Get("type")
+		events := s.eventStore.List(50, filterType)
+		if events == nil {
+			events = []camera.CameraEvent{}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"events": events,
+			"count":  len(events),
+		})
+		return
+	}
+
+	if r.Method == http.MethodPost {
+		// Handle event upload from Edge host
+		if s.config.CloudToken != "" || s.config.CloudRelay {
+			token := r.Header.Get("X-Renology-Token")
+			if token == "" {
+				authHeader := r.Header.Get("Authorization")
+				token = strings.TrimPrefix(authHeader, "Bearer ")
+			}
+			if s.config.CloudToken != "" && subtle.ConstantTimeCompare([]byte(token), []byte(s.config.CloudToken)) != 1 {
+				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+				return
+			}
+		}
+
+		err := r.ParseMultipartForm(50 * 1024 * 1024) // 50MB max
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":"failed to parse form: %v"}`, err), http.StatusBadRequest)
+			return
+		}
+
+		file, _, err := r.FormFile("video")
+		if err != nil {
+			http.Error(w, `{"error":"missing video file"}`, http.StatusBadRequest)
+			return
+		}
+		defer file.Close()
+
+		videoBytes, err := io.ReadAll(file)
+		if err != nil {
+			http.Error(w, `{"error":"failed to read video file"}`, http.StatusInternalServerError)
+			return
+		}
+
+		var durationSec, preRollSec float64
+		_, _ = fmt.Sscanf(r.FormValue("duration_sec"), "%f", &durationSec)
+		_, _ = fmt.Sscanf(r.FormValue("pre_roll_sec"), "%f", &preRollSec)
+
+		evt := camera.CameraEvent{
+			ID:          r.FormValue("id"),
+			TriggerType: r.FormValue("trigger_type"),
+			Title:       r.FormValue("title"),
+			Summary:     r.FormValue("summary"),
+			DurationSec: durationSec,
+			PreRollSec:  preRollSec,
+			Timestamp:   time.Now(),
+		}
+		if tStr := r.FormValue("timestamp"); tStr != "" {
+			if parsed, err := time.Parse(time.RFC3339, tStr); err == nil {
+				evt.Timestamp = parsed
+			}
+		}
+
+		if err := s.eventStore.Save(evt, videoBytes); err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":"failed to save event: %v"}`, err), http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"status": "created",
+			"id":     evt.ID,
+		})
+		return
+	}
+
+	http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+}
+
+// handleCameraEventMedia serves recorded event MP4 video files with range requests.
+func (s *Server) handleCameraEventMedia(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/camera/events/")
+	id := strings.TrimSuffix(path, ".mp4")
+
+	if id == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	_, filePath, err := s.eventStore.Get(id)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	w.Header().Set("Content-Type", "video/mp4")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	http.ServeFile(w, r, filePath)
+}
+
+// handleCameraEventTrigger generates an event snippet from the live pre-roll buffer on demand.
+func (s *Server) handleCameraEventTrigger(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"POST method required"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	var reqBody struct {
+		Type       string  `json:"type"`
+		Title      string  `json:"title"`
+		Summary    string  `json:"summary"`
+		PreRollSec float64 `json:"pre_roll_sec"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&reqBody)
+
+	if reqBody.Type == "" {
+		reqBody.Type = "manual"
+	}
+	if reqBody.Title == "" {
+		if reqBody.Type == "sound" {
+			reqBody.Title = "Sound Spike Detected"
+		} else if reqBody.Type == "motion" {
+			reqBody.Title = "Approach Motion Detected"
+		} else {
+			reqBody.Title = "Manual On-Demand Capture"
+		}
+	}
+	if reqBody.PreRollSec <= 0 {
+		reqBody.PreRollSec = 30
+	}
+
+	evt, err := s.cameraRelay.TriggerEvent(reqBody.Type, reqBody.Title, reqBody.Summary, time.Duration(reqBody.PreRollSec)*time.Second)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(evt)
 }
 

@@ -23,6 +23,12 @@ type RelayStatus struct {
 	LastActive    time.Time `json:"last_active"`
 }
 
+// ringFragment stores a single fMP4 fragment with capture timestamp in RAM.
+type ringFragment struct {
+	timestamp time.Time
+	data      []byte
+}
+
 // Relay coordinates on-demand camera streaming between Edge and Browsers.
 type Relay struct {
 	mu            sync.RWMutex
@@ -30,6 +36,9 @@ type Relay struct {
 	initSegment   []byte
 	hasInit       bool
 	lastFragment  []byte
+	ringBuffer    []ringFragment
+	ringDuration  time.Duration // Default 60 seconds
+	eventStore    *EventStore
 	activeViewers int
 	bytesStreamed int64
 	streamStart   time.Time
@@ -46,11 +55,101 @@ type Relay struct {
 // NewRelay initializes a new camera streaming relay.
 func NewRelay() *Relay {
 	return &Relay{
-		subscribers: make(map[chan []byte]struct{}),
-		triggerChan: make(chan struct{}, 1),
-		stopChan:    make(chan struct{}, 1),
-		gracePeriod: 30 * time.Second,
+		subscribers:  make(map[chan []byte]struct{}),
+		triggerChan:  make(chan struct{}, 1),
+		stopChan:     make(chan struct{}, 1),
+		gracePeriod:  30 * time.Second,
+		ringDuration: 60 * time.Second,
 	}
+}
+
+// SetEventStore assigns the EventStore instance to the relay.
+func (r *Relay) SetEventStore(es *EventStore) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.eventStore = es
+}
+
+// GetEventStore returns the attached EventStore.
+func (r *Relay) GetEventStore() *EventStore {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.eventStore
+}
+
+// GetPreRoll compiles a valid standalone fragmented MP4 containing the last N seconds of footage.
+func (r *Relay) GetPreRoll(duration time.Duration) ([]byte, float64) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if !r.hasInit || len(r.initSegment) == 0 || len(r.ringBuffer) == 0 {
+		return nil, 0
+	}
+
+	cutoff := time.Now().Add(-duration)
+	startIdx := 0
+	for i, rf := range r.ringBuffer {
+		if rf.timestamp.After(cutoff) {
+			startIdx = i
+			break
+		}
+	}
+
+	frags := r.ringBuffer[startIdx:]
+	if len(frags) == 0 {
+		return nil, 0
+	}
+
+	totalSize := len(r.initSegment)
+	for _, f := range frags {
+		totalSize += len(f.data)
+	}
+
+	result := make([]byte, totalSize)
+	copy(result, r.initSegment)
+	offset := len(r.initSegment)
+	for _, f := range frags {
+		copy(result[offset:], f.data)
+		offset += len(f.data)
+	}
+
+	actualDuration := time.Since(frags[0].timestamp).Seconds()
+	return result, actualDuration
+}
+
+// TriggerEvent captures the rolling pre-roll and generates a new CameraEvent.
+func (r *Relay) TriggerEvent(triggerType, title, summary string, preRollDuration time.Duration) (*CameraEvent, error) {
+	if preRollDuration <= 0 {
+		preRollDuration = 30 * time.Second
+	}
+
+	mp4Data, actualPreRoll := r.GetPreRoll(preRollDuration)
+	if len(mp4Data) == 0 {
+		return nil, fmt.Errorf("no video footage available in pre-roll buffer")
+	}
+
+	evt := CameraEvent{
+		Timestamp:   time.Now(),
+		TriggerType: triggerType,
+		Title:       title,
+		Summary:     summary,
+		DurationSec: actualPreRoll,
+		PreRollSec:  actualPreRoll,
+		SizeBytes:   int64(len(mp4Data)),
+	}
+
+	if r.eventStore != nil {
+		if err := r.eventStore.Save(evt, mp4Data); err != nil {
+			return nil, fmt.Errorf("failed to save event to store: %w", err)
+		}
+		// Retrieve saved event with populated ID and URL
+		savedList := r.eventStore.List(1, "")
+		if len(savedList) > 0 {
+			return &savedList[0], nil
+		}
+	}
+
+	return &evt, nil
 }
 
 // GetStatus returns the current relay status.
@@ -291,8 +390,25 @@ func (r *Relay) HandleIngress(ctx context.Context, reader io.Reader) error {
 				copy(fragment[len(currentMoof):], boxData)
 				currentMoof = nil
 
+				now := time.Now()
 				// Cache last fragment for instant playback on new viewer joins
 				r.lastFragment = fragment
+
+				// Append to rolling circular buffer in RAM
+				r.ringBuffer = append(r.ringBuffer, ringFragment{
+					timestamp: now,
+					data:      fragment,
+				})
+
+				// Prune fragments older than ringDuration (e.g. 60s)
+				cutoff := now.Add(-r.ringDuration)
+				startIdx := 0
+				for startIdx < len(r.ringBuffer) && r.ringBuffer[startIdx].timestamp.Before(cutoff) {
+					startIdx++
+				}
+				if startIdx > 0 {
+					r.ringBuffer = r.ringBuffer[startIdx:]
+				}
 
 				// Broadcast complete fragment to all active subscribers
 				for sub := range r.subscribers {

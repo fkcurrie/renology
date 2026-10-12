@@ -207,3 +207,10 @@ func (s *Storage) RecordRFMeasurement(t time.Time, mac, name string, rssi int, c
 	writer.Flush()
 	return nil
 }
+
+// OutputDir returns the base output directory for data storage.
+func (s *Storage) OutputDir() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.outputDir
+}

@@ -387,6 +387,12 @@
         </div>
       </div>
 
+      <!-- Event Playback Banner (Shown during recorded clip playback) -->
+      <div id="cameraEventBanner" class="camera-event-banner" style="display: none;">
+        <span class="camera-event-banner-text" id="cameraEventBannerText">⏮ Playing Event Clip</span>
+        <button id="cameraReturnLiveBtn" class="camera-return-live-btn" title="Exit clip playback and return to live feed">🔴 Return to Live Camera</button>
+      </div>
+
       <div class="camera-modal-footer">
         <div class="camera-audio-controls">
           <button id="cameraAudioToggle" class="camera-audio-btn muted" title="Click to Unmute Cottage Audio">
@@ -400,10 +406,31 @@
           <span class="hud-pill hw-accel">VA-API HW ACCEL</span>
         </div>
       </div>
+
+      <!-- Activity & Event Clips (20s Pre-Roll) -->
+      <div class="camera-events-section">
+        <div class="camera-events-header">
+          <div class="camera-events-title-wrap">
+            <span class="camera-events-heading">📼 ACTIVITY CLIPS (20s PRE-ROLL)</span>
+            <span class="camera-events-count-badge" id="cameraEventsCount">0 clips</span>
+          </div>
+          <div class="camera-events-actions">
+            <div class="camera-events-filter-group">
+              <button class="camera-filter-btn active" data-filter="">All</button>
+              <button class="camera-filter-btn" data-filter="sound">🔊 Sound</button>
+              <button class="camera-filter-btn" data-filter="motion">🏃 Motion</button>
+            </div>
+            <button id="cameraTriggerClipBtn" class="camera-trigger-clip-btn" title="Capture a 30s clip from pre-roll right now">📸 Record Clip</button>
+          </div>
+        </div>
+        <div class="camera-events-list" id="cameraEventsList">
+          <div class="camera-events-empty">Loading recorded event clips...</div>
+        </div>
+      </div>
     </div>
   </div>
 
   <script src="app.js?v=2.3.0"></script>
-  <script src="camera.js?v=2.9.0"></script>
+  <script src="camera.js?v=3.0.0"></script>
 </body>
 </html>

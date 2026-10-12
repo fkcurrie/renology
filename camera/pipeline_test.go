@@ -231,3 +231,69 @@ func TestRelayBoxAlignedIngress(t *testing.T) {
 	pw.Close()
 	cancel()
 }
+
+func TestRingBufferPreRoll(t *testing.T) {
+	relay := NewRelay()
+	relay.initSegment = []byte("fake_init_ftyp_moov")
+	relay.hasInit = true
+
+	now := time.Now()
+	relay.ringBuffer = []ringFragment{
+		{timestamp: now.Add(-40 * time.Second), data: []byte("frag_40s_ago")},
+		{timestamp: now.Add(-20 * time.Second), data: []byte("frag_20s_ago")},
+		{timestamp: now.Add(-5 * time.Second), data: []byte("frag_5s_ago")},
+	}
+
+	// Request 25 seconds of pre-roll (should get 20s and 5s fragments)
+	preRoll, actualDuration := relay.GetPreRoll(25 * time.Second)
+	if len(preRoll) == 0 {
+		t.Fatalf("expected non-empty preRoll")
+	}
+
+	expectedPrefix := "fake_init_ftyp_moov"
+	if string(preRoll[:len(expectedPrefix)]) != expectedPrefix {
+		t.Errorf("preRoll must start with initSegment")
+	}
+
+	if actualDuration <= 0 {
+		t.Errorf("expected positive actualDuration, got %f", actualDuration)
+	}
+}
+
+func TestEventStoreSaveAndList(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := NewEventStore(tmpDir)
+
+	evt := CameraEvent{
+		TriggerType: "sound",
+		Title:       "Test Sound Spike",
+		DurationSec: 25.0,
+		PreRollSec:  20.0,
+	}
+
+	err := store.Save(evt, []byte("fake_mp4_video_data"))
+	if err != nil {
+		t.Fatalf("failed to save event: %v", err)
+	}
+
+	list := store.List(10, "")
+	if len(list) != 1 {
+		t.Fatalf("expected 1 event in store, got %d", len(list))
+	}
+
+	if list[0].TriggerType != "sound" {
+		t.Errorf("expected trigger type sound, got %s", list[0].TriggerType)
+	}
+
+	// Test Get
+	gotEvt, filePath, err := store.Get(list[0].ID)
+	if err != nil {
+		t.Fatalf("failed to get event: %v", err)
+	}
+	if gotEvt.Title != "Test Sound Spike" {
+		t.Errorf("unexpected title: %s", gotEvt.Title)
+	}
+	if len(filePath) == 0 {
+		t.Errorf("expected valid filePath")
+	}
+}
