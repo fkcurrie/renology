@@ -51,6 +51,7 @@ gcloud run deploy "${SERVICE_NAME}" \
     --project "${PROJECT_ID}" \
     --region "${REGION}" \
     --allow-unauthenticated \
+    --use-http2 \
     --set-env-vars RENOLOGY_CLOUD_TOKEN="${SYNC_TOKEN}" \
     --memory 256Mi \
     --cpu 1 \
