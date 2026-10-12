@@ -69,7 +69,9 @@ const RenologyCamera = (function() {
   }
 
   function startStream(videoEl, loadingOverlay, statusBadge) {
-    if (isStreaming) return;
+    if (isStreaming) {
+      stopStream(videoEl);
+    }
     isStreaming = true;
 
     if (loadingOverlay) loadingOverlay.style.display = 'flex';
@@ -392,7 +394,21 @@ const RenologyCamera = (function() {
 
     startStream(videoEl, overlay, statusBadge);
 
+    // Auto-manage mobile tab switching: pause on background, reconnect on return
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        if (!isStreaming) {
+          startStream(videoEl, overlay, statusBadge);
+        }
+      } else {
+        stopStream(videoEl);
+      }
+    });
+
     window.addEventListener('beforeunload', () => {
+      stopStream(videoEl);
+    });
+    window.addEventListener('pagehide', () => {
       stopStream(videoEl);
     });
   }
