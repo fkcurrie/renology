@@ -4,13 +4,15 @@ import "time"
 
 // HistoryPoint24h represents a downsampled time-series point for the 24-hour solar power chart.
 type HistoryPoint24h struct {
-	Timestamp      time.Time `json:"timestamp"`
-	TimeLabel      string    `json:"time_label"`        // e.g. "08:15"
-	SolarPowerW    int       `json:"solar_power_w"`     // Solar Power Watts (PV Generation)
-	BatteryPowerW  int       `json:"battery_power_w"`   // Battery Routing Watts (Vbat * Ibat)
-	PVVoltage      float64   `json:"pv_voltage_v"`      // Solar Panel Voltage
-	BatterySOC     int       `json:"battery_soc"`       // Battery State of Charge %
-	BatteryVoltage float64   `json:"battery_voltage_v"` // Battery Voltage
+	Timestamp       time.Time `json:"timestamp"`
+	TimeLabel       string    `json:"time_label"`                  // e.g. "08:15"
+	SolarPowerW     int       `json:"solar_power_w"`               // Solar Power Watts (PV Generation)
+	BatteryPowerW   int       `json:"battery_power_w"`             // Battery Routing Watts (Vbat * Ibat)
+	PVVoltage       float64   `json:"pv_voltage_v"`                // Solar Panel Voltage
+	BatterySOC      int       `json:"battery_soc"`                 // Battery State of Charge %
+	BatteryVoltage  float64   `json:"battery_voltage_v"`           // Battery Voltage
+	SolarIrradiance float64   `json:"solar_irradiance_wm2,omitempty"` // Local Weather Station Pyranometer (W/m²)
+	SunPotentialW   int       `json:"sun_potential_w,omitempty"`   // Available Optical Sun Power on 400W Array (W)
 }
 
 // DailySummary7d represents a daily solar production record for the 7-day history chart.

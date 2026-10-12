@@ -302,6 +302,39 @@ ORDER BY b_epoch ASC`
 			results[epoch] = p
 		}
 	}
+
+	// Enrich with weather station solar irradiance if weather_telemetry exists
+	wQuery := `
+SELECT
+    (strftime('%s', timestamp) / ?) * ? as b_epoch,
+    COALESCE(ROUND(AVG(solar_radiation_wm2), 1), 0.0) as avg_rad
+FROM weather_telemetry
+WHERE timestamp >= ? AND timestamp <= ?
+GROUP BY (strftime('%s', timestamp) / ?)`
+
+	if wRows, err := s.db.Query(wQuery, bucketSeconds, bucketSeconds, start.Format(time.RFC3339Nano), end.Format(time.RFC3339Nano), bucketSeconds); err == nil {
+		defer wRows.Close()
+		for wRows.Next() {
+			var wEpoch int64
+			var avgRad float64
+			if err := wRows.Scan(&wEpoch, &avgRad); err == nil {
+				// Theoretical available sun watts on Frank's 400W array (1000 W/m² = 400W)
+				sunW := int(math.Round((avgRad / 1000.0) * 400.0))
+				if pt, exists := results[wEpoch]; exists {
+					pt.SolarIrradiance = avgRad
+					pt.SunPotentialW = sunW
+					results[wEpoch] = pt
+				} else {
+					results[wEpoch] = models.HistoryPoint24h{
+						Timestamp:       time.Unix(wEpoch, 0),
+						SolarIrradiance: avgRad,
+						SunPotentialW:   sunW,
+					}
+				}
+			}
+		}
+	}
+
 	return results, rows.Err()
 }
 

@@ -120,6 +120,7 @@
           <div class="speedometer-center-readout">
             <div class="speedo-speed" id="speedoVoltsVal">36.1<span class="unit">V</span></div>
             <div class="speedo-label">STRING VOLTAGE (V)</div>
+            <div class="speedo-temp-boost" id="speedoTempBoost" style="font-size: 10px; color: #38bdf8; margin-top: 3px; font-weight: 600; letter-spacing: 0.04em;"></div>
           </div>
         </div>
 
@@ -137,7 +138,7 @@
           </div>
           <div class="potential-col text-right">
             <span class="potential-sublabel">SUN POTENTIAL</span>
-            <span class="potential-val highlight-gold" id="sunPotentialVal">~300 W</span>
+            <span class="potential-val highlight-gold" id="sunPotentialVal">~400 W</span>
           </div>
         </div>
 
@@ -161,7 +162,7 @@
         </div>
 
         <div class="lifetime-row">
-          <span>ARRAY: <strong>2x 160W (320W Nom)</strong></span>
+          <span>ARRAY: <strong>4x 100W (400W Nom 2S2P)</strong></span>
           <span class="speedo-redline-tag">SAFE RANGE (&lt;100V)</span>
         </div>
       </section>
@@ -221,6 +222,7 @@
             <span class="w-label">SOLAR IRRADIANCE</span>
             <span class="w-val" id="weatherSolarRad">--<span class="unit">W/m²</span></span>
             <span class="w-sub" id="weatherSolarFluxDesc">Direct Sunlight Flux</span>
+            <span class="w-equiv" id="weatherArrayOpticalW" style="font-size: 11px; color: #fbbf24; margin-top: 3px; display: block; font-weight: 600;">~0W on 400W Array</span>
           </div>
           <div class="weather-box">
             <span class="w-label">RAINFALL TODAY</span>
@@ -266,6 +268,7 @@
         <div class="chart-legend" id="historyChartLegend">
           <span class="legend-item" id="legItemVolts"><span class="legend-dot volt-dot"></span> Solar Volts (V)</span>
           <span class="legend-item" id="legItemPower"><span class="legend-dot solar-dot"></span> Solar Power (W)</span>
+          <span class="legend-item" id="legItemSunPot"><span class="legend-dot" style="background: #fbbf24; box-shadow: 0 0 6px rgba(251, 191, 36, 0.6);"></span> Available Sun (400W Array)</span>
           <span class="legend-item" id="legItemBatt"><span class="legend-dot batt-dot"></span> Battery Power (W)</span>
           <span class="legend-item" id="legItemSoc"><span class="legend-dot soc-dot"></span> Battery SOC (%)</span>
           <span class="legend-item" id="legItemPeak"><span class="legend-dot peak-line-dot"></span> Peak Level</span>
