@@ -109,10 +109,10 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		// Set caching headers for static assets
 		if strings.HasSuffix(r.URL.Path, ".css") {
 			w.Header().Set("Content-Type", "text/css; charset=utf-8")
-			w.Header().Set("Cache-Control", "public, max-age=3600")
+			w.Header().Set("Cache-Control", "no-cache, must-revalidate")
 		} else if strings.HasSuffix(r.URL.Path, ".js") {
 			w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
-			w.Header().Set("Cache-Control", "public, max-age=3600")
+			w.Header().Set("Cache-Control", "no-cache, must-revalidate")
 		}
 		fileServer.ServeHTTP(w, r)
 	})

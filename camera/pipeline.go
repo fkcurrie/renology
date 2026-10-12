@@ -239,46 +239,46 @@ func (p *Pipeline) Start(parentCtx context.Context) (io.ReadCloser, error) {
 	return stdout, nil
 }
 
-// Stop cleanly terminates the GStreamer pipeline.
+// Stop cleanly terminates the GStreamer pipeline without deadlocking the mutex.
 func (p *Pipeline) Stop() {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-
 	if !p.isRunning || p.cmd == nil || p.cmd.Process == nil {
+		p.mu.Unlock()
 		return
 	}
 
-	log.Printf("[Camera Pipeline] Stopping GStreamer PID %d...", p.cmd.Process.Pid)
+	proc := p.cmd.Process
+	cancel := p.cancel
+	p.mu.Unlock()
+
+	log.Printf("[Camera Pipeline] Stopping GStreamer PID %d...", proc.Pid)
 
 	// Send SIGINT first to allow mp4mux to flush cleanly
-	_ = p.cmd.Process.Signal(syscall.SIGINT)
+	_ = proc.Signal(syscall.SIGINT)
 
+	// Wait up to 2 seconds for process to exit outside of mutex lock
 	done := make(chan struct{})
 	go func() {
 		for i := 0; i < 20; i++ {
-			p.mu.Lock()
-			running := p.isRunning
-			p.mu.Unlock()
-			if !running {
+			if !p.IsRunning() {
 				close(done)
 				return
 			}
 			time.Sleep(100 * time.Millisecond)
 		}
 		// If still running after 2s, force kill
-		p.mu.Lock()
-		if p.isRunning && p.cmd != nil && p.cmd.Process != nil {
-			_ = p.cmd.Process.Kill()
-		}
-		p.mu.Unlock()
+		_ = proc.Kill()
 		close(done)
 	}()
 
 	<-done
-	if p.cancel != nil {
-		p.cancel()
+	if cancel != nil {
+		cancel()
 	}
+
+	p.mu.Lock()
 	p.isRunning = false
+	p.mu.Unlock()
 }
 
 // IsRunning returns whether the pipeline process is currently active.

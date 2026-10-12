@@ -88,12 +88,11 @@ const RenologyCamera = (function() {
     abortController = new AbortController();
     queue = [];
     mediaSource = new MediaSource();
-    videoEl.src = URL.createObjectURL(mediaSource);
 
-    mediaSource.addEventListener('sourceopen', async () => {
+    async function onSourceOpen() {
       try {
         sourceBuffer = mediaSource.addSourceBuffer(mime);
-        sourceBuffer.mode = 'sequence';
+        // Use default 'segments' mode for multi-track audio+video
 
         sourceBuffer.addEventListener('updateend', () => {
           if (queue.length > 0 && !sourceBuffer.updating) {
@@ -167,7 +166,15 @@ const RenologyCamera = (function() {
           }
         }
       }
-    });
+    }
+
+    if (mediaSource.readyState === 'open') {
+      onSourceOpen();
+    } else {
+      mediaSource.addEventListener('sourceopen', onSourceOpen, { once: true });
+    }
+
+    videoEl.src = URL.createObjectURL(mediaSource);
   }
 
   function stopStream(videoEl) {

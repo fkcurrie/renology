@@ -62,6 +62,7 @@ func (w *EdgeWorker) Start(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
+			log.Printf("[Camera Edge] Wait check note: %v (retry in %v)", err, backoff)
 			time.Sleep(backoff)
 			if backoff < 10*time.Second {
 				backoff *= 2
