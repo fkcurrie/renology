@@ -127,6 +127,8 @@ func (w *EdgeWorker) prepareCameraHardware() {
 	wasAsleep := false
 	if _, err := os.Stat(asleepFlag); err == nil {
 		wasAsleep = true
+	} else if data, err := os.ReadFile("/sys/class/drm/card1-eDP-1/dpms"); err == nil && strings.TrimSpace(string(data)) == "Off" {
+		wasAsleep = true
 	}
 
 	cmd := exec.Command("xset", "-display", ":0", "dpms", "force", "on")
@@ -135,8 +137,11 @@ func (w *EdgeWorker) prepareCameraHardware() {
 	}
 
 	if wasAsleep {
-		log.Println("[Camera Edge] Display was asleep. Woke display; pausing 1s for motion-wake to release camera sensor...")
-		time.Sleep(1000 * time.Millisecond)
+		log.Println("[Camera Edge] Display was asleep. Woke display; pausing 1.2s for motion-wake to release camera sensor...")
+		time.Sleep(1200 * time.Millisecond)
+	} else {
+		// Safety pause to allow any transient X11 / sensor state to settle
+		time.Sleep(200 * time.Millisecond)
 	}
 }
 
@@ -144,7 +149,16 @@ func (w *EdgeWorker) streamToCloud(ctx context.Context) error {
 	// Ensure camera hardware is free and screen is awake
 	w.prepareCameraHardware()
 
+	// Ensure video source is refreshed to the best available physical camera now that screen is awake
+	src := DetectAvailableSource()
+	w.pipeline.SetVideoSource(src)
+
 	stdout, err := w.pipeline.Start(ctx)
+	if err != nil && src != SourceTest {
+		log.Printf("[Camera Edge] Primary camera start failed (%v); falling back to diagnostic test pattern", err)
+		w.pipeline.SetVideoSource(SourceTest)
+		stdout, err = w.pipeline.Start(ctx)
+	}
 	if err != nil {
 		return fmt.Errorf("pipeline start error: %w", err)
 	}

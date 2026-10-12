@@ -123,3 +123,41 @@ func TestRelayViewerLifecycle(t *testing.T) {
 		t.Errorf("expected 0 viewers, got %d", status.Viewers)
 	}
 }
+
+func TestPipelineSetVideoSource(t *testing.T) {
+	p := NewPipeline(PipelineConfig{
+		Width:       1280,
+		Height:      720,
+		Framerate:   30,
+		VideoSource: SourceTest,
+	})
+
+	if p.GetVideoSource() != SourceTest {
+		t.Errorf("expected initial source SourceTest, got %v", p.GetVideoSource())
+	}
+
+	// Switch to SourceLibcamera dynamically
+	p.SetVideoSource(SourceLibcamera)
+	if p.GetVideoSource() != SourceLibcamera {
+		t.Errorf("expected switched source SourceLibcamera, got %v", p.GetVideoSource())
+	}
+
+	args := p.BuildGStreamerArgs()
+	foundLibcamera := false
+	for _, a := range args {
+		if a == "libcamerasrc" {
+			foundLibcamera = true
+			break
+		}
+	}
+	if !foundLibcamera {
+		t.Errorf("expected libcamerasrc in args after switching to SourceLibcamera: %v", args)
+	}
+}
+
+func TestDetectAvailableSource(t *testing.T) {
+	src := DetectAvailableSource()
+	if src != SourceLibcamera && src != SourceV4L2 && src != SourceTest {
+		t.Errorf("unexpected VideoSourceType returned: %v", src)
+	}
+}

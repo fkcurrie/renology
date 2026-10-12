@@ -73,9 +73,25 @@ func NewPipeline(cfg PipelineConfig) *Pipeline {
 	}
 }
 
+// isSurfaceIPU3Hardware checks if the host is a Surface Go device with Intel IPU3 camera subsystem.
+func isSurfaceIPU3Hardware() bool {
+	// 1. Check for Intel IPU3 CIO2 driver in sysfs
+	if _, err := os.Stat("/sys/bus/pci/drivers/ipu3-cio2"); err == nil {
+		return true
+	}
+	// 2. Check DMI product name for Surface Go
+	if data, err := os.ReadFile("/sys/class/dmi/id/product_name"); err == nil {
+		name := strings.ToLower(string(data))
+		if strings.Contains(name, "surface go") {
+			return true
+		}
+	}
+	return false
+}
+
 // DetectAvailableSource inspects system devices to pick the best video source.
 func DetectAvailableSource() VideoSourceType {
-	// 1. Check for standard V4L2 capture devices (e.g. external USB camera)
+	// 1. Check for standard external V4L2 capture devices (e.g. external USB webcam)
 	matches, err := filepath.Glob("/dev/video*")
 	if err == nil {
 		for _, dev := range matches {
@@ -91,7 +107,15 @@ func DetectAvailableSource() VideoSourceType {
 		}
 	}
 
-	// 2. Check if libcamera has enumerated cameras
+	// 2. Surface Go internal IPU3 CSI-2 camera check (OV5693 front / OV8865 back)
+	// Surface hardware has dedicated MIPI CSI-2 sensors driven via libcamerasrc.
+	// Even if cam -l fails temporarily because surface-motion-wake holds /dev/media0
+	// while the screen is asleep, the physical sensors exist and will be used once the screen wakes.
+	if isSurfaceIPU3Hardware() {
+		return SourceLibcamera
+	}
+
+	// 3. Check if libcamera has enumerated cameras
 	if _, err := exec.LookPath("cam"); err == nil {
 		out, err := exec.Command("cam", "-l").Output()
 		if err == nil && len(out) > 0 {
@@ -102,7 +126,7 @@ func DetectAvailableSource() VideoSourceType {
 		}
 	}
 
-	// 3. Fallback to live diagnostic slate with real-time audio
+	// 4. Fallback to live diagnostic slate with real-time audio
 	return SourceTest
 }
 
@@ -236,6 +260,13 @@ func (p *Pipeline) Start(parentCtx context.Context) (io.ReadCloser, error) {
 		}
 	}()
 
+	// Brief check to verify pipeline didn't fail immediately on device link/caps error
+	time.Sleep(150 * time.Millisecond)
+	if !p.IsRunning() {
+		cancel()
+		return nil, fmt.Errorf("gstreamer process exited immediately during pipeline initialization")
+	}
+
 	return stdout, nil
 }
 
@@ -286,6 +317,23 @@ func (p *Pipeline) IsRunning() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.isRunning
+}
+
+// SetVideoSource updates the configured video source and applies defaults if needed.
+func (p *Pipeline) SetVideoSource(src VideoSourceType) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.config.VideoSource = src
+	if src == SourceLibcamera && p.config.CameraName == "" {
+		p.config.CameraName = `\\\\_SB_.PCI0.LNK1`
+	}
+}
+
+// GetVideoSource returns the current configured video source.
+func (p *Pipeline) GetVideoSource() VideoSourceType {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.config.VideoSource
 }
 
 // stringsFields splits pipeline string taking simple quotes into account.
