@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	golang.org/x/net v0.61.0
-	modernc.org/sqlite v1.59.0
+	modernc.org/sqlite v1.60.1
 	tinygo.org/x/bluetooth v0.16.0
 )
 
@@ -26,7 +26,7 @@ require (
 	golang.org/x/exp v0.0.0-20260727155853-b88d891fe743 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
-	modernc.org/libc v1.75.7 // indirect
+	modernc.org/libc v1.77.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 	tinygo.org/x/espradio v0.3.0 // indirect
