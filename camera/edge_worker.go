@@ -120,7 +120,7 @@ func (w *EdgeWorker) checkViewerWait(ctx context.Context) (bool, error) {
 	return false, nil
 }
 
-func (w *EdgeWorker) prepareCameraHardware() {
+func (w *EdgeWorker) prepareCameraHardware() bool {
 	// If the display is asleep, surface-motion-wake.service holds the OV5693 camera sensor.
 	// Wake the display via DPMS to signal surface-motion-wake to release the sensor immediately.
 	asleepFlag := "/run/user/1000/screen_asleep"
@@ -143,11 +143,52 @@ func (w *EdgeWorker) prepareCameraHardware() {
 		// Safety pause to allow any transient X11 / sensor state to settle
 		time.Sleep(200 * time.Millisecond)
 	}
+
+	return wasAsleep
+}
+
+func (w *EdgeWorker) startScreenIllumination() {
+	scriptPath := "/home/fcurrie/Projects/renology/scripts/screen_illuminator.py"
+	if _, err := os.Stat(scriptPath); err != nil {
+		return
+	}
+	cmd := exec.Command("python3", scriptPath, "auto")
+	cmd.Env = append(os.Environ(), "DISPLAY=:0", "XAUTHORITY=/home/fcurrie/.Xauthority")
+	if err := cmd.Start(); err != nil {
+		log.Printf("[Camera Edge] Note: screen illuminator start: %v", err)
+	} else {
+		log.Printf("[Camera Edge] Screen illuminator spawned (PID %d)", cmd.Process.Pid)
+	}
+}
+
+func (w *EdgeWorker) stopScreenIllumination() {
+	scriptPath := "/home/fcurrie/Projects/renology/scripts/screen_illuminator.py"
+	if _, err := os.Stat(scriptPath); err != nil {
+		return
+	}
+	cmd := exec.Command("python3", scriptPath, "stop")
+	cmd.Env = append(os.Environ(), "DISPLAY=:0", "XAUTHORITY=/home/fcurrie/.Xauthority")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("[Camera Edge] Note: screen illuminator stop error: %v (%s)", err, strings.TrimSpace(string(out)))
+	} else {
+		log.Printf("[Camera Edge] Screen illuminator stopped: %s", strings.TrimSpace(string(out)))
+	}
 }
 
 func (w *EdgeWorker) streamToCloud(ctx context.Context) error {
-	// Ensure camera hardware is free and screen is awake
-	w.prepareCameraHardware()
+	// 1. If room is dark, activate screen illumination as bright white softbox
+	w.startScreenIllumination()
+	defer w.stopScreenIllumination()
+
+	// 2. Ensure camera hardware is free and screen is awake
+	wasAsleep := w.prepareCameraHardware()
+	defer func() {
+		if wasAsleep {
+			log.Println("[Camera Edge] Display was asleep before stream; ensuring DPMS sleep restored...")
+			_ = exec.Command("xset", "-display", ":0", "dpms", "force", "off").Run()
+		}
+	}()
 
 	// Ensure video source is refreshed to the best available physical camera now that screen is awake
 	src := DetectAvailableSource()
