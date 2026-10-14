@@ -573,9 +573,8 @@ func (s *Storage) GetRecentTelemetry(minutes int, referenceTime time.Time) (*mod
 		if sqlRecords, err := s.queryTelemetryRange(startWindow, endWindow); err == nil && len(sqlRecords) > 0 {
 			records = sqlRecords
 		}
-	}
-
-	if len(records) == 0 {
+	} else {
+		// Fallback only if SQLite database engine is not initialized
 		all := s.readAllTelemetryRecords()
 		for _, r := range all {
 			if !r.Timestamp.Before(startWindow) && !r.Timestamp.After(endWindow) {
