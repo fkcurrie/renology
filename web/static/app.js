@@ -2577,7 +2577,7 @@
   // =========================================================================
   // CONNECTION STATUS (HEARTBEAT VS ALARM BELL)
   // =========================================================================
-  function updateConnectionStatus(isOnline, lastTime) {
+  function updateConnectionStatus(isOnline, lastTime, ageSec) {
     if (!elHeartbeatContainer || !elHeartbeatIcon || !elHeartbeatLabel) return;
     if (isOnline) {
       elHeartbeatContainer.className = 'connection-heartbeat online';
@@ -2590,7 +2590,8 @@
       elHeartbeatIcon.textContent = '🔔';
       elHeartbeatIcon.className = 'heartbeat-icon alarm';
       elHeartbeatLabel.textContent = 'LINK DOWN';
-      elHeartbeatContainer.title = 'Bluetooth Link Interrupted — No response from controller';
+      const ageInfo = (ageSec !== undefined && ageSec !== null) ? ` (${ageSec}s ago)` : '';
+      elHeartbeatContainer.title = `Bluetooth Link Interrupted — No response from controller${ageInfo}`;
     }
   }
 
@@ -2901,27 +2902,38 @@
   // =========================================================================
   // API FETCH & REAL-TIME POLLING
   // =========================================================================
+  let consecutiveFetchErrors = 0;
+
   async function fetchStatus() {
     try {
       const resp = await fetch('/api/status');
       if (!resp.ok) {
-        updateConnectionStatus(false);
+        consecutiveFetchErrors++;
+        // Tolerate transient HTTP hiccups; only mark link down after persistent failures (6 polls @ 5s = 30s)
+        if (consecutiveFetchErrors >= 6) {
+          updateConnectionStatus(false);
+        }
         return;
       }
       const t = await resp.json();
+      consecutiveFetchErrors = 0;
 
-      // Check packet freshness (< 18 seconds)
+      // Check packet freshness (< 60 seconds)
+      // Polling cadence is 15s. Over the weak BLE link to the power shed (-91 to -100 dBm),
+      // transient retries or a single missed poll take 15-30s. A 60s threshold (4 missed polls)
+      // prevents false-positive "LINK DOWN" alert flapping while promptly catching real drops.
       let isFresh = false;
       let syncStr = '';
+      let ageSec = null;
       if (t.timestamp) {
         const syncDate = new Date(t.timestamp);
-        const ageSec = (Date.now() - syncDate.getTime()) / 1000;
+        ageSec = (Date.now() - syncDate.getTime()) / 1000;
         syncStr = syncDate.toLocaleTimeString();
-        if (ageSec < 18) {
+        if (ageSec < 60) {
           isFresh = true;
         }
       }
-      updateConnectionStatus(isFresh, syncStr);
+      updateConnectionStatus(isFresh, syncStr, ageSec ? Math.round(ageSec) : null);
 
       // Update Device Header
       if (t.device_name && elDeviceName) elDeviceName.textContent = t.device_name;
@@ -3076,10 +3088,13 @@
       const elLastUpdated = document.getElementById('lastUpdatedText');
       if (elLastUpdated && t.timestamp) {
         const d = new Date(t.timestamp);
-        elLastUpdated.textContent = `Live Telemetry Synced: ${d.toLocaleTimeString()} (5s BLE loop • PV: ${(t.pv_voltage_v || 0).toFixed(1)}V)`;
+        elLastUpdated.textContent = `Live Telemetry Synced: ${d.toLocaleTimeString()} (15s BLE loop • PV: ${(t.pv_voltage_v || 0).toFixed(1)}V)`;
       }
     } catch (err) {
-      updateConnectionStatus(false);
+      consecutiveFetchErrors++;
+      if (consecutiveFetchErrors >= 6) {
+        updateConnectionStatus(false);
+      }
       console.warn('Status poll error:', err);
     }
   }
