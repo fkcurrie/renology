@@ -33,7 +33,12 @@ func GetDorsetSunTimes(refTime time.Time) *models.SunTimes {
 		refTime = time.Now()
 	}
 
-	dateKey := refTime.Format("2006-01-02")
+	dorsetLoc, err := time.LoadLocation("America/Toronto")
+	if err != nil {
+		dorsetLoc = time.FixedZone("EDT", -4*3600)
+	}
+
+	dateKey := refTime.In(dorsetLoc).Format("2006-01-02")
 
 	sunCacheMu.RLock()
 	cached, ok := sunCache[dateKey]
@@ -64,13 +69,18 @@ func GetDorsetSunTimes(refTime time.Time) *models.SunTimes {
 // the standard NOAA / NRC Canada algorithm with standard 90.833° zenith (accounting for
 // atmospheric refraction and solar disc semidiameter).
 func CalculateSunTimes(t time.Time, lat, lon float64, locName string) *models.SunTimes {
-	loc := t.Location()
-	midnight := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
-	dayOfYear := t.YearDay()
+	dorsetLoc, err := time.LoadLocation("America/Toronto")
+	if err != nil {
+		dorsetLoc = time.FixedZone("EDT", -4*3600)
+	}
+
+	tDorset := t.In(dorsetLoc)
+	midnight := time.Date(tDorset.Year(), tDorset.Month(), tDorset.Day(), 0, 0, 0, 0, time.UTC)
+	dayOfYear := tDorset.YearDay()
 
 	// Fractional year in radians (accounting for leap years)
 	daysInYear := 365.0
-	if isLeapYear(t.Year()) {
+	if isLeapYear(tDorset.Year()) {
 		daysInYear = 366.0
 	}
 	gamma := (2.0 * math.Pi / daysInYear) * float64(dayOfYear-1)
@@ -99,9 +109,9 @@ func CalculateSunTimes(t time.Time, lat, lon float64, locName string) *models.Su
 		sunriseMin := solarNoonMin - (haDeg * 4.0)
 		sunsetMin := solarNoonMin + (haDeg * 4.0)
 
-		sunriseTime = midnight.Add(time.Duration(sunriseMin * float64(time.Minute))).In(loc)
-		sunsetTime = midnight.Add(time.Duration(sunsetMin * float64(time.Minute))).In(loc)
-		noonTime = midnight.Add(time.Duration(solarNoonMin * float64(time.Minute))).In(loc)
+		sunriseTime = midnight.Add(time.Duration(sunriseMin * float64(time.Minute))).In(dorsetLoc)
+		sunsetTime = midnight.Add(time.Duration(sunsetMin * float64(time.Minute))).In(dorsetLoc)
+		noonTime = midnight.Add(time.Duration(solarNoonMin * float64(time.Minute))).In(dorsetLoc)
 	}
 
 	dayLengthDuration := sunsetTime.Sub(sunriseTime)

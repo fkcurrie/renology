@@ -139,10 +139,17 @@
   const canvas7d = document.getElementById('chart7dCanvas');
   const ctx7d = canvas7d ? canvas7d.getContext('2d') : null;
 
-  // --- Clock ---
+  // --- Clock (Always displayed in Dorset, Ontario / America/Toronto solar panel local time) ---
   function updateClock() {
-    const now = new Date();
-    if (elClock) elClock.textContent = now.toTimeString().split(' ')[0];
+    if (elClock) {
+      elClock.textContent = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Toronto',
+        hour12: false,
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      }).format(new Date());
+    }
   }
   setInterval(updateClock, 1000);
   updateClock();
@@ -573,10 +580,17 @@
     const ss = new Date(midnightUTC + sunsetUTCMin * 60000);
     const sn = new Date(midnightUTC + solarNoonUTCMin * 60000);
 
+    const formatDorsetTimeStr = dObj => new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Toronto',
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit'
+    }).format(dObj);
+
     const pad = n => (n < 10 ? '0' + n : '' + n);
-    const srTime = pad(sr.getHours()) + ':' + pad(sr.getMinutes());
-    const ssTime = pad(ss.getHours()) + ':' + pad(ss.getMinutes());
-    const snTime = pad(sn.getHours()) + ':' + pad(sn.getMinutes());
+    const srTime = formatDorsetTimeStr(sr);
+    const ssTime = formatDorsetTimeStr(ss);
+    const snTime = formatDorsetTimeStr(sn);
     const dayLenMin = Math.round((ss.getTime() - sr.getTime()) / 60000);
     const dayLength = Math.floor(dayLenMin / 60) + 'h ' + pad(dayLenMin % 60) + 'm';
 
@@ -1231,13 +1245,13 @@
         const d = new Date(pt.p.timestamp);
         if (!isNaN(d.getTime())) {
           if (mode === 'today') {
-            timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+            timeStr = d.toLocaleTimeString('en-CA', { timeZone: 'America/Toronto', hour: '2-digit', minute: '2-digit', hour12: false });
           } else if (mode === 'week') {
-            timeStr = d.toLocaleDateString([], { weekday: 'short' });
+            timeStr = d.toLocaleDateString('en-CA', { timeZone: 'America/Toronto', weekday: 'short' });
           } else if (mode === 'year') {
-            timeStr = d.toLocaleDateString([], { month: 'short' });
+            timeStr = d.toLocaleDateString('en-CA', { timeZone: 'America/Toronto', month: 'short' });
           } else {
-            timeStr = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+            timeStr = d.toLocaleDateString('en-CA', { timeZone: 'America/Toronto', month: 'short', day: 'numeric' });
           }
         }
       }
@@ -1297,9 +1311,9 @@
         const d = new Date(vPt.timestamp);
         if (!isNaN(d.getTime())) {
           if (mode === 'today') {
-            voltageTimeStr = `Today at ${d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+            voltageTimeStr = `Today at ${d.toLocaleTimeString('en-CA', { timeZone: 'America/Toronto', hour: 'numeric', minute: '2-digit' })}`;
           } else {
-            voltageTimeStr = d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }) + ' at ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+            voltageTimeStr = d.toLocaleDateString('en-CA', { timeZone: 'America/Toronto', weekday: 'short', month: 'short', day: 'numeric' }) + ' at ' + d.toLocaleTimeString('en-CA', { timeZone: 'America/Toronto', hour: 'numeric', minute: '2-digit' });
           }
         }
       }
@@ -1307,9 +1321,9 @@
         const d = new Date(wPt.timestamp);
         if (!isNaN(d.getTime())) {
           if (mode === 'today') {
-            powerTimeStr = `Today at ${d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+            powerTimeStr = `Today at ${d.toLocaleTimeString('en-CA', { timeZone: 'America/Toronto', hour: 'numeric', minute: '2-digit' })}`;
           } else {
-            powerTimeStr = d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }) + ' at ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+            powerTimeStr = d.toLocaleDateString('en-CA', { timeZone: 'America/Toronto', weekday: 'short', month: 'short', day: 'numeric' }) + ' at ' + d.toLocaleTimeString('en-CA', { timeZone: 'America/Toronto', hour: 'numeric', minute: '2-digit' });
           }
         }
       }
@@ -1447,16 +1461,16 @@
       const d = new Date(p.timestamp);
       if (!isNaN(d.getTime())) {
         if (mode === 'today') {
-          timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+          timeStr = d.toLocaleTimeString('en-CA', { timeZone: 'America/Toronto', hour: '2-digit', minute: '2-digit', hour12: false });
         } else if (mode === 'week') {
-          const day = d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
-          const tm = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+          const day = d.toLocaleDateString('en-CA', { timeZone: 'America/Toronto', weekday: 'short', month: 'short', day: 'numeric' });
+          const tm = d.toLocaleTimeString('en-CA', { timeZone: 'America/Toronto', hour: '2-digit', minute: '2-digit', hour12: false });
           timeStr = `${day} ${tm}`;
         } else if (mode === 'year') {
-          timeStr = d.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+          timeStr = d.toLocaleDateString('en-CA', { timeZone: 'America/Toronto', month: 'short', day: 'numeric', year: 'numeric' });
         } else {
-          const day = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
-          const tm = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+          const day = d.toLocaleDateString('en-CA', { timeZone: 'America/Toronto', month: 'short', day: 'numeric' });
+          const tm = d.toLocaleTimeString('en-CA', { timeZone: 'America/Toronto', hour: '2-digit', minute: '2-digit', hour12: false });
           timeStr = `${day} ${tm}`;
         }
       }
@@ -2928,7 +2942,7 @@
       if (t.timestamp) {
         const syncDate = new Date(t.timestamp);
         ageSec = (Date.now() - syncDate.getTime()) / 1000;
-        syncStr = syncDate.toLocaleTimeString();
+        syncStr = syncDate.toLocaleTimeString('en-CA', { timeZone: 'America/Toronto', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
         if (ageSec < 60) {
           isFresh = true;
         }

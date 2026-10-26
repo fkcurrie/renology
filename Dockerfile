@@ -34,6 +34,7 @@ USER renology:renology
 
 ENV PORT=8080
 ENV GIN_MODE=release
+ENV TZ=America/Toronto
 EXPOSE 8080
 
 # Cloud Run defaults: relay mode ingests edge pushes and serves kiosk UI

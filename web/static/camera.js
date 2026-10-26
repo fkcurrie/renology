@@ -311,7 +311,7 @@ const RenologyCamera = (function() {
   function formatEventTime(ts) {
     if (!ts) return 'Just now';
     const d = new Date(ts);
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' • ' + d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    return d.toLocaleTimeString('en-CA', { timeZone: 'America/Toronto', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) + ' • ' + d.toLocaleDateString('en-CA', { timeZone: 'America/Toronto', month: 'short', day: 'numeric' });
   }
 
   function escapeHtml(str) {

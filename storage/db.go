@@ -633,8 +633,12 @@ func formatRecordTime(t time.Time, referenceTime time.Time) string {
 	if t.IsZero() {
 		return ""
 	}
-	tInLoc := t.In(referenceTime.Location())
-	refInLoc := referenceTime.In(referenceTime.Location())
+	loc, err := time.LoadLocation("America/Toronto")
+	if err != nil {
+		loc = time.FixedZone("EDT", -4*3600)
+	}
+	tInLoc := t.In(loc)
+	refInLoc := referenceTime.In(loc)
 
 	y1, m1, d1 := tInLoc.Date()
 	y2, m2, d2 := refInLoc.Date()
