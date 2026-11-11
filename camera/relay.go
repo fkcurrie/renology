@@ -174,16 +174,22 @@ func (r *Relay) GetStatus() RelayStatus {
 	}
 }
 
+// HasActiveViewers reports whether at least one viewer is currently waiting or watching.
+func (r *Relay) HasActiveViewers() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.activeViewers > 0
+}
+
 // WaitForStreamRequest is called by the Edge worker (via long-polling).
 // It blocks until at least one viewer requests the camera, or until timeout.
 func (r *Relay) WaitForStreamRequest(ctx context.Context, timeout time.Duration) bool {
 	// First check if viewers are already waiting
-	r.mu.RLock()
-	viewers := r.activeViewers
-	r.mu.RUnlock()
-
-	if viewers > 0 {
+	if r.HasActiveViewers() {
 		return true
+	}
+	if timeout <= 0 {
+		return false
 	}
 
 	timer := time.NewTimer(timeout)

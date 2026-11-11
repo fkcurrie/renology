@@ -148,30 +148,36 @@ func main() {
 		}
 	}
 
-	// 2. Start Cloud Pusher if configured
-	if *cloudURL != "" {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			startCloudPusher(ctx, *cloudURL, *cloudToken, store, time.Duration(*pollSec)*time.Second, *verbose)
-		}()
-	}
-
-	// 2b. Start Edge Camera Worker if not running in cloud relay mode
+	// 2. Initialize Edge Camera Worker if not running in cloud relay mode
+	var cameraWorker *camera.EdgeWorker
 	if !*cloudRelay {
 		targetURL := *cloudURL
 		if targetURL == "" && *httpAddr != "" {
 			targetURL = "http://localhost" + *httpAddr
 		}
 		if targetURL != "" {
+			cameraWorker = camera.NewEdgeWorker(targetURL, *cloudToken, nil)
+			if *cloudURL != "" {
+				// Cloud Run mode: trigger camera via POST /api/telemetry/push responses
+				// instead of holding a 25s long-poll open on /api/camera/wait-request.
+				cameraWorker.SetPushTriggered(true)
+			}
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
 				time.Sleep(1 * time.Second)
-				worker := camera.NewEdgeWorker(targetURL, *cloudToken, nil)
-				worker.Start(ctx)
+				cameraWorker.Start(ctx)
 			}()
 		}
+	}
+
+	// 3. Start Cloud Pusher if configured
+	if *cloudURL != "" {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			startCloudPusher(ctx, *cloudURL, *cloudToken, store, time.Duration(*pollSec)*time.Second, *verbose, cameraWorker)
+		}()
 	}
 
 	// 3. Run Poller or Web-Only Mode
@@ -461,8 +467,9 @@ func printRecentReport(dataDir string, minutes int, raw bool) {
 }
 
 // startCloudPusher runs a resilient background worker that pushes live telemetry,
-// weather readings, and historical curves to Cloud Run.
-func startCloudPusher(ctx context.Context, cloudURL, token string, store *storage.Storage, interval time.Duration, verbose bool) {
+// weather readings, and historical curves to Cloud Run, and checks the push
+// response for pending camera stream requests.
+func startCloudPusher(ctx context.Context, cloudURL, token string, store *storage.Storage, interval time.Duration, verbose bool, cameraWorker *camera.EdgeWorker) {
 	cloudURL = strings.TrimRight(cloudURL, "/")
 	pushURL := cloudURL + "/api/telemetry/push"
 	httpClient := &http.Client{
@@ -514,26 +521,44 @@ func startCloudPusher(ctx context.Context, cloudURL, token string, store *storag
 				continue
 			}
 
-			req, err := http.NewRequestWithContext(ctx, http.MethodPost, pushURL, bytes.NewReader(bodyBytes))
-			if err != nil {
-				continue
-			}
-			req.Header.Set("Content-Type", "application/json")
-			if token != "" {
-				req.Header.Set("X-Renology-Token", token)
-			}
+			pushTelemetryOnce(ctx, httpClient, pushURL, token, bodyBytes, verbose, cameraWorker)
+		}
+	}
+}
 
-			resp, err := httpClient.Do(req)
-			if err != nil {
-				if verbose {
-					log.Printf("[Cloud Pusher] Sync error: %v", err)
-				}
-				continue
-			}
-			resp.Body.Close()
-			if resp.StatusCode != http.StatusOK && verbose {
-				log.Printf("[Cloud Pusher] Remote returned status %d", resp.StatusCode)
-			}
+func pushTelemetryOnce(ctx context.Context, httpClient *http.Client, pushURL, token string, bodyBytes []byte, verbose bool, cameraWorker *camera.EdgeWorker) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, pushURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("X-Renology-Token", token)
+	}
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		if verbose {
+			log.Printf("[Cloud Pusher] Sync error: %v", err)
+		}
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		if verbose {
+			log.Printf("[Cloud Pusher] Remote returned status %d", resp.StatusCode)
+		}
+		return
+	}
+
+	var pushResp struct {
+		Status       string `json:"status"`
+		CameraAction string `json:"camera_action"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 16*1024)).Decode(&pushResp); err == nil {
+		if pushResp.CameraAction == "start" && cameraWorker != nil {
+			cameraWorker.Trigger()
 		}
 	}
 }

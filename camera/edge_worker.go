@@ -10,15 +10,20 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
 // EdgeWorker runs on the Surface Go 2 edge host to manage on-demand streaming to Cloud Run.
 type EdgeWorker struct {
-	cloudURL   string
-	cloudToken string
-	pipeline   *Pipeline
-	httpClient *http.Client
+	cloudURL    string
+	cloudToken  string
+	pipeline    *Pipeline
+	httpClient  *http.Client
+	pushMode    bool
+	triggerChan chan struct{}
+	streaming   atomic.Bool
+	streamFn    func(context.Context) error
 }
 
 // NewEdgeWorker creates a new edge streaming worker.
@@ -32,29 +37,99 @@ func NewEdgeWorker(cloudURL, token string, pipeline *Pipeline) *EdgeWorker {
 		})
 	}
 
-	return &EdgeWorker{
-		cloudURL:   strings.TrimRight(cloudURL, "/"),
-		cloudToken: token,
-		pipeline:   pipeline,
+	w := &EdgeWorker{
+		cloudURL:    strings.TrimRight(cloudURL, "/"),
+		cloudToken:  token,
+		pipeline:    pipeline,
+		triggerChan: make(chan struct{}, 1),
 		httpClient: &http.Client{
 			Timeout: 35 * time.Second,
 		},
+	}
+	w.streamFn = w.streamToCloud
+	return w
+}
+
+// SetPushTriggered switches the worker to passive push-triggered mode (signaled
+// via Trigger() from telemetry push responses) instead of polling /api/camera/wait-request.
+func (w *EdgeWorker) SetPushTriggered(enabled bool) {
+	w.pushMode = enabled
+}
+
+// Trigger signals the worker to start a streaming session if one is not already active.
+func (w *EdgeWorker) Trigger() {
+	if w.streaming.Load() {
+		return
+	}
+	select {
+	case w.triggerChan <- struct{}{}:
+	default:
+	}
+}
+
+// HasPendingTrigger reports whether a wake trigger is currently queued.
+func (w *EdgeWorker) HasPendingTrigger() bool {
+	return len(w.triggerChan) > 0
+}
+
+func (w *EdgeWorker) runStreamSession(ctx context.Context) {
+	w.streaming.Store(true)
+	log.Println("[Camera Edge] Live viewer connected on Cloud Run! Starting hardware camera capture...")
+	if err := w.streamFn(ctx); err != nil {
+		log.Printf("[Camera Edge] Streaming session ended: %v", err)
+	}
+
+	// Ensure pipeline is stopped and resources released
+	if w.pipeline != nil {
+		w.pipeline.Stop()
+	}
+	w.streaming.Store(false)
+
+	// Drain any stale trigger queued while the stream was shutting down
+	select {
+	case <-w.triggerChan:
+	default:
+	}
+
+	select {
+	case <-ctx.Done():
+	case <-time.After(1 * time.Second):
 	}
 }
 
 // Start begins the edge worker loop. It blocks until ctx is canceled.
 func (w *EdgeWorker) Start(ctx context.Context) {
+	if w.pushMode {
+		log.Printf("[Camera Edge] Starting push-triggered camera worker -> %s", w.cloudURL)
+		for {
+			select {
+			case <-ctx.Done():
+				if w.pipeline != nil {
+					w.pipeline.Stop()
+				}
+				return
+			case <-w.triggerChan:
+				w.runStreamSession(ctx)
+			}
+		}
+	}
+
 	log.Printf("[Camera Edge] Starting on-demand camera worker -> %s", w.cloudURL)
 
 	backoff := 1 * time.Second
+	const minPollInterval = 2 * time.Second
 
 	for {
 		select {
 		case <-ctx.Done():
-			w.pipeline.Stop()
+			if w.pipeline != nil {
+				w.pipeline.Stop()
+			}
 			return
 		default:
 		}
+
+		attemptStart := time.Now()
 
 		// 1. Long-poll Cloud Run to check if any viewer is waiting
 		shouldStream, err := w.checkViewerWait(ctx)
@@ -63,7 +138,11 @@ func (w *EdgeWorker) Start(ctx context.Context) {
 				return
 			}
 			log.Printf("[Camera Edge] Wait check note: %v (retry in %v)", err, backoff)
-			time.Sleep(backoff)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(backoff):
+			}
 			if backoff < 10*time.Second {
 				backoff *= 2
 			}
@@ -73,18 +152,18 @@ func (w *EdgeWorker) Start(ctx context.Context) {
 		backoff = 1 * time.Second
 
 		if !shouldStream {
+			if elapsed := time.Since(attemptStart); elapsed < minPollInterval {
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(minPollInterval - elapsed):
+				}
+			}
 			continue
 		}
 
 		// 2. Viewer detected! Launch GStreamer hardware pipeline and stream to Cloud Run
-		log.Println("[Camera Edge] Live viewer connected on Cloud Run! Starting hardware camera capture...")
-		if err := w.streamToCloud(ctx); err != nil {
-			log.Printf("[Camera Edge] Streaming session ended: %v", err)
-		}
-
-		// Ensure pipeline is stopped and resources released
-		w.pipeline.Stop()
-		time.Sleep(1 * time.Second)
+		w.runStreamSession(ctx)
 	}
 }
 
@@ -109,15 +188,16 @@ func (w *EdgeWorker) checkViewerWait(ctx context.Context) (bool, error) {
 		var actionResp struct {
 			Action string `json:"action"`
 		}
-		if err := json.NewDecoder(resp.Body).Decode(&actionResp); err == nil {
-			return actionResp.Action == "start", nil
+		if err := json.NewDecoder(resp.Body).Decode(&actionResp); err != nil {
+			return false, err
 		}
-	} else if resp.StatusCode == http.StatusNoContent {
-		// Timeout without viewer; loop again
+		return actionResp.Action == "start", nil
+	}
+	if resp.StatusCode == http.StatusNoContent {
 		return false, nil
 	}
 
-	return false, nil
+	return false, fmt.Errorf("unexpected wait-request HTTP status %d", resp.StatusCode)
 }
 
 func (w *EdgeWorker) prepareCameraHardware() bool {

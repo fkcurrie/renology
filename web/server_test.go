@@ -232,7 +232,7 @@ func TestCloudRelayPush(t *testing.T) {
 		t.Fatalf("Expected 401 Unauthorized, got %d", rec.Code)
 	}
 
-	// 2. Test authorized push (correct token)
+	// 2. Test authorized push (correct token) returns camera_action=idle when no viewer
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest("POST", "/api/telemetry/push", strings.NewReader(string(bodyBytes)))
 	req.Header.Set("X-Renology-Token", "secret123")
@@ -240,6 +240,31 @@ func TestCloudRelayPush(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("Expected 200 OK, got %d: %s", rec.Code, rec.Body.String())
 	}
+	var pushResp map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &pushResp); err != nil {
+		t.Fatalf("Failed to parse push response JSON: %v", err)
+	}
+	if pushResp["camera_action"] != "idle" {
+		t.Errorf("Expected camera_action=idle when no viewer, got %v", pushResp["camera_action"])
+	}
+
+	// 2b. Test authorized push returns camera_action=start when a viewer is registered
+	sub, _ := server.CameraRelay().RegisterViewer()
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("POST", "/api/telemetry/push", strings.NewReader(string(bodyBytes)))
+	req.Header.Set("X-Renology-Token", "secret123")
+	server.httpServer.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK with viewer, got %d", rec.Code)
+	}
+	pushResp = nil
+	if err := json.Unmarshal(rec.Body.Bytes(), &pushResp); err != nil {
+		t.Fatalf("Failed to parse push response JSON: %v", err)
+	}
+	if pushResp["camera_action"] != "start" {
+		t.Errorf("Expected camera_action=start when viewer active, got %v", pushResp["camera_action"])
+	}
+	server.CameraRelay().UnregisterViewer(sub)
 
 	// 3. Test GET /api/status returns pushed telemetry
 	rec = httptest.NewRecorder()
@@ -372,6 +397,37 @@ func TestCameraEndpoints(t *testing.T) {
 	server.httpServer.Handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("Expected 401 Unauthorized for wait-request without token, got %d", rec.Code)
+	}
+
+	// 4b. Test GET /api/camera/wait-request?immediate=1 returns 204 immediately when no viewer
+	startWait := time.Now()
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("GET", "/api/camera/wait-request?immediate=1", nil)
+	req.Header.Set("X-Renology-Token", "cam-secret-456")
+	server.httpServer.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("Expected 204 No Content for immediate wait-request with no viewer, got %d", rec.Code)
+	}
+	if elapsed := time.Since(startWait); elapsed > time.Second {
+		t.Errorf("Expected immediate wait-request to return quickly, took %v", elapsed)
+	}
+
+	// 4c. Test GET /api/camera/wait-request?immediate=1 returns 200 {"action":"start"} when viewer active
+	sub, _ := server.CameraRelay().RegisterViewer()
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("GET", "/api/camera/wait-request?immediate=1", nil)
+	req.Header.Set("X-Renology-Token", "cam-secret-456")
+	server.httpServer.Handler.ServeHTTP(rec, req)
+	server.CameraRelay().UnregisterViewer(sub)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK for immediate wait-request with viewer, got %d", rec.Code)
+	}
+	var waitResp map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &waitResp); err != nil {
+		t.Fatalf("Failed to parse wait-request JSON: %v", err)
+	}
+	if waitResp["action"] != "start" {
+		t.Errorf("Expected action=start, got %q", waitResp["action"])
 	}
 
 	// 5. Test direct GET /api/camera/stream without ticket (should be 403 Forbidden)

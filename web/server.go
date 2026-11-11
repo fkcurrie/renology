@@ -419,10 +419,16 @@ func (s *Server) handlePushTelemetry(w http.ResponseWriter, r *http.Request) {
 		_ = s.config.Storage.Save(payload.Telemetry)
 	}
 
+	cameraAction := "idle"
+	if s.cameraRelay != nil && s.cameraRelay.HasActiveViewers() {
+		cameraAction = "start"
+	}
+
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":      "ok",
-		"received_at": time.Now().Format(time.RFC3339),
+		"status":        "ok",
+		"received_at":   time.Now().Format(time.RFC3339),
+		"camera_action": cameraAction,
 	})
 }
 
@@ -589,11 +595,22 @@ func (s *Server) handleCameraWaitRequest(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	// Disable HTTP write timeout for long polling
-	rc := http.NewResponseController(w)
-	_ = rc.SetWriteDeadline(time.Time{})
+	// Support non-blocking checks (?immediate=1 or ?timeout=0). Default retains 25s
+	// long-poll only for legacy edge clients that have not yet upgraded to
+	// push-triggered camera wake via POST /api/telemetry/push (old clients spin
+	// without sleeping if 204 is returned immediately).
+	waitTimeout := 25 * time.Second
+	if r.URL.Query().Get("immediate") == "1" || r.URL.Query().Get("timeout") == "0" {
+		waitTimeout = 0
+	}
 
-	shouldStream := s.cameraRelay.WaitForStreamRequest(r.Context(), 25*time.Second)
+	if waitTimeout > 0 {
+		// Disable HTTP write timeout for long polling
+		rc := http.NewResponseController(w)
+		_ = rc.SetWriteDeadline(time.Time{})
+	}
+
+	shouldStream := s.cameraRelay.WaitForStreamRequest(r.Context(), waitTimeout)
 	if shouldStream {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
